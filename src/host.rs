@@ -3,6 +3,8 @@ use super::Result;
 use crate::authz;
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors;
+use crate::middleware;
+use crate::middleware::Middleware;
 use crate::router::InvokerPair;
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
@@ -24,6 +26,10 @@ lazy_static! {
         wapc::set_host_callback(host_callback);
         Arc::new(RwLock::new(Router::default()))
     };
+}
+
+pub fn add_middleware(mid: impl Middleware) {
+    middleware::MIDDLEWARES.write().unwrap().push(Box::new(mid));
 }
 
 /// Adds a portable capability provider wasm module to the runtime host. The identity of this provider
@@ -158,8 +164,7 @@ fn listen_for_native_invocations(
                 let inv_r = if target == capid {
                     // if target of invocation is this particular capability,
                     // then perform the invocation on the plugin
-                    let lock = crate::plugins::PLUGMAN.read().unwrap();
-                    lock.call(&inv).unwrap()
+                    middleware::invoke_capability(inv).unwrap()
                 } else {
                     // Capability is handling a dispatch (delivering) to actor module
                     if !authz::can_invoke(target, &capid) {
@@ -225,19 +230,8 @@ fn listen_for_invocations(
             if let Ok(inv) = inv_r.recv() {
                 let v: Vec<_> = inv.operation.split('!').collect();
                 let inv = Invocation::new(inv.origin, v[1], inv.msg); // Remove routing prefix from operation
-                match guest.call(&inv.operation, &inv.msg) {
-                    Ok(v) => {
-                        resp_s.send(InvocationResponse::success(v)).unwrap();
-                    }
-                    Err(e) => {
-                        resp_s
-                            .send(InvocationResponse::error(&format!(
-                                "Failed to invoke guest call: {}",
-                                e
-                            )))
-                            .unwrap();
-                    }
-                }
+                let inv_r = middleware::invoke_actor(inv, &mut guest).unwrap();
+                resp_s.send(inv_r).unwrap();
             }
         }
     });
@@ -347,7 +341,7 @@ impl Invocation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InvocationResponse {
     pub msg: Vec<u8>,
     pub error: Option<String>,
