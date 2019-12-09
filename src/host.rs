@@ -21,6 +21,8 @@ use wascc_codec::core::CapabilityConfiguration;
 use wascc_codec::core::OP_CONFIGURE;
 use wascc_codec::core::{CapabilityIdResponse, OP_IDENTIFY_CAPABILITY};
 
+pub use authz::set_auth_hook;
+
 lazy_static! {
     pub static ref ROUTER: Arc<RwLock<Router>> = {
         wapc::set_host_callback(host_callback);

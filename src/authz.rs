@@ -10,6 +10,29 @@ lazy_static! {
         { Arc::new(RwLock::new(HashMap::new())) };
     pub(crate) static ref CLAIMS_MAP: Arc<RwLock<HashMap<u64, String>>> =
         { Arc::new(RwLock::new(HashMap::new())) };
+    static ref AUTH_HOOK: RwLock<Option<Box<AuthHook>>> = RwLock::new(None);
+}
+
+type AuthHook = dyn Fn(&Claims) -> bool + Sync + Send + 'static;
+
+#[allow(dead_code)]
+pub fn set_auth_hook<F>(hook: F) 
+where F: Fn(&Claims) -> bool
+        + Sync
+        + Send
+        + 'static,
+{
+    *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
+}
+
+pub(crate) fn check_auth(claims: &Claims) -> bool {
+    let lock = AUTH_HOOK.read().unwrap();
+    match *lock {
+        Some(ref f) => {
+            f(claims)
+        },
+        None => true
+    }
 }
 
 pub(crate) fn store_claims(claims: Claims) -> Result<()> {
@@ -60,6 +83,11 @@ pub(crate) fn extract_and_store_claims(buf: &[u8]) -> Result<wascap::jwt::Token>
     match token {
         Some(token) => {
             enforce_validation(&token.jwt)?;
+            if !check_auth(&token.claims) {                
+                return Err(errors::new(errors::ErrorKind::Authorization(
+                    "Authorization hook denied access to module".into()
+                )))
+            }
 
             info!(
                 "Discovered capability attestations: {}",
@@ -85,7 +113,7 @@ fn enforce_validation(jwt: &str) -> Result<()> {
             "Module cannot be used before {}",
             v.not_before_human
         ))))
-    } else {
+    } else {        
         Ok(())
     }
 }
