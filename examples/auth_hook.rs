@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use wascc_host::host;
-use wascap::jwt::Claims;
+use wascap::jwt::Token;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -22,9 +22,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn verify_issuer(claims: &Claims) -> bool {
-    claims.issuer == "AAGRUXXTGSP4C27RWPTMCHCJF56JD53EQPA2R7RPC5VI4E274KPRMMJ5"
-    //claims.issuer == "some unknown account here"
+fn verify_issuer(token: &Token) -> bool {
+    token.claims.issuer == "AAGRUXXTGSP4C27RWPTMCHCJF56JD53EQPA2R7RPC5VI4E274KPRMMJ5"
+    //token.claims.issuer == "some unknown account here"
 }
 
 fn generate_port_config(port: u16) -> HashMap<String, String> {

@@ -1,3 +1,4 @@
+use wascap::jwt::Token;
 use crate::errors;
 use crate::Result;
 use std::collections::HashMap;
@@ -13,11 +14,11 @@ lazy_static! {
     static ref AUTH_HOOK: RwLock<Option<Box<AuthHook>>> = RwLock::new(None);
 }
 
-type AuthHook = dyn Fn(&Claims) -> bool + Sync + Send + 'static;
+type AuthHook = dyn Fn(&Token) -> bool + Sync + Send + 'static;
 
 #[allow(dead_code)]
 pub fn set_auth_hook<F>(hook: F) 
-where F: Fn(&Claims) -> bool
+where F: Fn(&Token) -> bool
         + Sync
         + Send
         + 'static,
@@ -25,11 +26,11 @@ where F: Fn(&Claims) -> bool
     *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
 }
 
-pub(crate) fn check_auth(claims: &Claims) -> bool {
+pub(crate) fn check_auth(token: &Token) -> bool {
     let lock = AUTH_HOOK.read().unwrap();
     match *lock {
         Some(ref f) => {
-            f(claims)
+            f(token)
         },
         None => true
     }
@@ -83,7 +84,7 @@ pub(crate) fn extract_and_store_claims(buf: &[u8]) -> Result<wascap::jwt::Token>
     match token {
         Some(token) => {
             enforce_validation(&token.jwt)?;
-            if !check_auth(&token.claims) {                
+            if !check_auth(&token) {                
                 return Err(errors::new(errors::ErrorKind::Authorization(
                     "Authorization hook denied access to module".into()
                 )))
