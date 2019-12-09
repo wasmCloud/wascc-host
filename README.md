@@ -10,7 +10,7 @@ The _WebAssembly Secure Capabilities Connector_ (waSCC) host library allows cons
 For more information on concepts, architecture, and tutorials, check out [wascc.dev](https://wasc.dev).
 
 ## Examples
-To run the examples, simply issue the following command (assming you have the latest version of Rust installed):
+To run the examples, simply issue the following command (assuming you have the latest version of Rust installed) from the root `wascc-host` directory:
 
 ```
 $ RUST_LOG=info cargo run --example [example name]
