@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::prelude::*;
 use wascc_host::{host, Actor, Capability};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {

@@ -36,8 +36,7 @@ pub fn add_middleware(mid: impl Middleware) {
 }
 
 /// Adds a portable capability provider wasm module to the runtime host. The identity of this provider
-/// will be read by invoking the `OP_IDENTIFY_CAPABILITY` waPC call, which will result
-/// in, among other things, the capability ID of the plugin (e.g. `wascc:messaging`)
+/// will be determined by examining the capability attestation in this actor's embedded token. 
 pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
     let wg = WaitGroup::new();
     let router = ROUTER.clone();

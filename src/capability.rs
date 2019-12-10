@@ -4,6 +4,7 @@ use libloading::Symbol;
 use std::ffi::OsStr;
 use wascc_codec::capabilities::CapabilityProvider;
 
+/// Represents a native capability provider compiled as a shared object library
 pub struct Capability {
     pub(crate) capid: String,
     pub(crate) plugin: Box<dyn CapabilityProvider>,
@@ -11,6 +12,7 @@ pub struct Capability {
 }
 
 impl Capability {
+    /// Reads a capability provider from a file
     pub fn from_file<P: AsRef<OsStr>>(filename: P) -> Result<Self> {
         type PluginCreate = unsafe fn() -> *mut dyn CapabilityProvider;
 

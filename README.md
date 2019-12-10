@@ -9,6 +9,8 @@ The _WebAssembly Secure Capabilities Connector_ (waSCC) host library allows cons
 
 For more information on concepts, architecture, and tutorials, check out [wascc.dev](https://wasc.dev).
 
+**WARNING**: The host API is currently experimental and likely to change
+
 ## Examples
 To run the examples, simply issue the following command (assuming you have the latest version of Rust installed) from the root `wascc-host` directory:
 
