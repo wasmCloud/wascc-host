@@ -10,7 +10,7 @@ documentation = "https://docs.rs/wascc-host"
 readme = "README.md"
 keywords = ["webassembly", "wasm", "wasi", "wascc"]
 categories = ["wasm", "data-structures","command-line-utilities"]
-
+exclude = ["examples/.assets"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
