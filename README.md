@@ -18,7 +18,7 @@ To run the examples, simply issue the following command (assuming you have the l
 $ RUST_LOG=info cargo run --example [example name]
 ```
 
-Where the example name is the name (without the `.rs`) of any of the examples in the examples folder. Make sure that you have checked out the [examples](https://github.com/wascc/examples) repository as a peer of **wascc-host**, or the relative paths in the examples won't work.
+Where the example name is the name (without the `.rs`) of any of the examples in the examples folder. 
 
 **Pre-Requisites** - For the `subscriber` example, you will need an instance of [NATS](https://nats.io) running locally. For the `kvcounter` example, you will need Redis running locally on the default port.
 
