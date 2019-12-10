@@ -1,16 +1,15 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::prelude::*;
-use wascc_host::host;
 use wascap::jwt::Token;
+use wascc_host::{host, Actor, Capability};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     host::set_auth_hook(verify_issuer); // This MUST be set before you load an actor, otherwise it won't run
-    host::add_actor(load_wasm("./examples/.assets/echo.wasm")?)?;    
-    host::add_native_capability("./examples/.assets/libwascc_httpsrv.so")?;
+    host::add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
+    host::add_native_capability(Capability::from_file(
+        "./examples/.assets/libwascc_httpsrv.so",
+    )?)?;
 
-    
     host::configure(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
@@ -32,12 +31,4 @@ fn generate_port_config(port: u16) -> HashMap<String, String> {
     hm.insert("PORT".to_string(), port.to_string());
 
     hm
-}
-
-fn load_wasm(path: &str) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let mut file = File::open(path)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-
-    Ok(buf)
 }

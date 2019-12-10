@@ -1,9 +1,9 @@
-use wascap::jwt::Token;
 use crate::errors;
 use crate::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
+use wascap::jwt::Token;
 use wascap::prelude::*;
 
 lazy_static! {
@@ -17,11 +17,9 @@ lazy_static! {
 type AuthHook = dyn Fn(&Token) -> bool + Sync + Send + 'static;
 
 #[allow(dead_code)]
-pub fn set_auth_hook<F>(hook: F) 
-where F: Fn(&Token) -> bool
-        + Sync
-        + Send
-        + 'static,
+pub fn set_auth_hook<F>(hook: F)
+where
+    F: Fn(&Token) -> bool + Sync + Send + 'static,
 {
     *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
 }
@@ -29,10 +27,8 @@ where F: Fn(&Token) -> bool
 pub(crate) fn check_auth(token: &Token) -> bool {
     let lock = AUTH_HOOK.read().unwrap();
     match *lock {
-        Some(ref f) => {
-            f(token)
-        },
-        None => true
+        Some(ref f) => f(token),
+        None => true,
     }
 }
 
@@ -84,10 +80,10 @@ pub(crate) fn extract_and_store_claims(buf: &[u8]) -> Result<wascap::jwt::Token>
     match token {
         Some(token) => {
             enforce_validation(&token.jwt)?;
-            if !check_auth(&token) {                
+            if !check_auth(&token) {
                 return Err(errors::new(errors::ErrorKind::Authorization(
-                    "Authorization hook denied access to module".into()
-                )))
+                    "Authorization hook denied access to module".into(),
+                )));
             }
 
             info!(
@@ -114,7 +110,7 @@ fn enforce_validation(jwt: &str) -> Result<()> {
             "Module cannot be used before {}",
             v.not_before_human
         ))))
-    } else {        
+    } else {
         Ok(())
     }
 }

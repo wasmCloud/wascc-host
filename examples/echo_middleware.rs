@@ -1,17 +1,17 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::prelude::*;
 use wascc_host::host::{self, Invocation, InvocationResponse};
-use wascc_host::Middleware;
+use wascc_host::{Actor, Capability, Middleware};
 
 #[macro_use]
 extern crate log;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(load_wasm("./examples/.assets/echo.wasm")?)?;
-    host::add_actor(load_wasm("./examples/.assets/echo2.wasm")?)?;
-    host::add_native_capability("./examples/.assets/libwascc_httpsrv.so")?;
+    host::add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
+    host::add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
+    host::add_native_capability(Capability::from_file(
+        "./examples/.assets/libwascc_httpsrv.so",
+    )?)?;
 
     host::add_middleware(LoggingMiddleware::default());
 
@@ -36,14 +36,6 @@ fn generate_port_config(port: u16) -> HashMap<String, String> {
     hm.insert("PORT".to_string(), port.to_string());
 
     hm
-}
-
-fn load_wasm(path: &str) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let mut file = File::open(path)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-
-    Ok(buf)
 }
 
 #[derive(Default)]

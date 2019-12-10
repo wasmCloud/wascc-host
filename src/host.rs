@@ -1,6 +1,8 @@
 use super::router::Router;
 use super::Result;
+use crate::actor::Actor;
 use crate::authz;
+use crate::capability::Capability;
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors;
 use crate::middleware;
@@ -11,7 +13,6 @@ use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
 use prost::Message;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
@@ -37,11 +38,17 @@ pub fn add_middleware(mid: impl Middleware) {
 /// Adds a portable capability provider wasm module to the runtime host. The identity of this provider
 /// will be read by invoking the `OP_IDENTIFY_CAPABILITY` waPC call, which will result
 /// in, among other things, the capability ID of the plugin (e.g. `wascc:messaging`)
-pub fn add_capability(buf: Vec<u8>, wasi: WasiParams) -> Result<()> {
-    let token = authz::extract_and_store_claims(&buf)?;
+pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
     let wg = WaitGroup::new();
     let router = ROUTER.clone();
-    listen_for_invocations(wg.clone(), token.claims, router, buf, Some(wasi), false)?;
+    listen_for_invocations(
+        wg.clone(),
+        actor.token.claims,
+        router,
+        actor.bytes.clone(),
+        Some(wasi),
+        false,
+    )?;
     wg.wait();
     Ok(())
 }
@@ -50,12 +57,18 @@ pub fn add_capability(buf: Vec<u8>, wasi: WasiParams) -> Result<()> {
 /// by inspecting the claims embedded in the module's custom section as a JWT. The identity
 /// comes from the `subject` field on the embedded claims and is the primary key of the
 /// module identity.
-pub fn add_actor(buf: Vec<u8>) -> Result<()> {
-    let token = authz::extract_and_store_claims(&buf)?;
+pub fn add_actor(actor: Actor) -> Result<()> {
     let wg = WaitGroup::new();
-    info!("Adding actor {} to host", token.claims.subject);
+    info!("Adding actor {} to host", actor.public_key());
     let router = ROUTER.clone();
-    listen_for_invocations(wg.clone(), token.claims, router, buf, None, true)?;
+    listen_for_invocations(
+        wg.clone(),
+        actor.token.claims,
+        router,
+        actor.bytes.clone(),
+        None,
+        true,
+    )?;
     wg.wait();
     Ok(())
 }
@@ -63,11 +76,12 @@ pub fn add_actor(buf: Vec<u8>) -> Result<()> {
 /// Adds a native linux dynamic library (plugin) as a capability provider to the runtime host. The
 /// identity and other metadata about this provider is determined by loading the plugin from disk
 /// and invoking the appropriate plugin trait methods.
-pub fn add_native_capability<P: AsRef<OsStr>>(filename: P) -> Result<()> {
-    let capid = crate::plugins::PLUGMAN
+pub fn add_native_capability(capability: Capability) -> Result<()> {
+    let capid = capability.capid.clone();
+    crate::plugins::PLUGMAN
         .write()
         .unwrap()
-        .load_plugin(filename)?;
+        .add_plugin(capability)?;
     let wg = WaitGroup::new();
     let router = ROUTER.clone();
     if router.read().unwrap().get_pair(&capid).is_some() {

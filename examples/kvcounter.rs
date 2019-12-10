@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
-use wascc_host::host;
+use wascc_host::{host, Actor, Capability};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(load_wasm("./examples/.assets/kvcounter.wasm")?)?;
-    host::add_native_capability("./examples/.assets/libwascc_httpsrv.so")?;
-    host::add_native_capability("./examples/.assets/libredis_provider.so")?;
+    host::add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
+    host::add_native_capability(Capability::from_file(
+        "./examples/.assets/libwascc_httpsrv.so",
+    )?)?;
+    host::add_native_capability(Capability::from_file(
+        "./examples/.assets/libredis_provider.so",
+    )?)?;
 
     host::configure(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
@@ -37,12 +41,4 @@ fn http_config() -> HashMap<String, String> {
     hm.insert("PORT".to_string(), "8081".to_string());
 
     hm
-}
-
-fn load_wasm(path: &str) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let mut file = File::open(path)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-
-    Ok(buf)
 }
