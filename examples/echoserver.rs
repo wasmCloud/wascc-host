@@ -3,10 +3,10 @@ use wascc_host::{host, Actor, Capability};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
-    host::add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
+    host::add_actor(Actor::from_file("../examples/.assets/echo.wasm")?)?;
+    host::add_actor(Actor::from_file("../examples/.assets/echo2.wasm")?)?;
     host::add_native_capability(Capability::from_file(
-        "./examples/.assets/libwascc_httpsrv.so",
+        "../examples/.assets/libwascc_httpsrv.so",
     )?)?;
 
     host::configure(
