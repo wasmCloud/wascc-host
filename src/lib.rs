@@ -8,6 +8,7 @@ pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
 pub use capability::Capability;
 pub use middleware::Middleware;
+pub use wapc::prelude::WasiParams;
 
 mod actor;
 mod authz;

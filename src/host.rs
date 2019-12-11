@@ -20,7 +20,6 @@ use wapc::prelude::*;
 use wascap::jwt::Claims;
 use wascc_codec::core::CapabilityConfiguration;
 use wascc_codec::core::OP_CONFIGURE;
-use wascc_codec::core::{CapabilityIdResponse, OP_IDENTIFY_CAPABILITY};
 
 pub use authz::set_auth_hook;
 
@@ -230,7 +229,7 @@ fn listen_for_invocations(
             let route_key = if actor {
                 claims.subject
             } else {
-                get_capability_id(router.clone(), &mut guest).unwrap() // NOTE: this is an intentional panic
+                claims.caps.unwrap()[0].to_string() // If we can't unwrap this, the cap is bad, so panic is fine                
             };
             let mut lock = router.write().unwrap();
             lock.add_route(route_key.clone(), inv_s, resp_r);
@@ -306,25 +305,6 @@ fn invoke(
         .send(Invocation::new(origin, op, payload.to_vec()))
         .unwrap();
     Ok(resp_r.recv().unwrap())
-}
-
-/// Used for WASI-based capability providers. Invoke the `IdentifyCapability` operation
-/// on the capability provider. Returns the same kind of metadata that the native
-/// plugins return upon being probed
-fn get_capability_id(router: Arc<RwLock<Router>>, host: &mut WapcHost) -> Result<String> {
-    let res = host.call(OP_IDENTIFY_CAPABILITY, &[])?;
-    let capinfo = CapabilityIdResponse::decode(&res)?;
-    {
-        let lock = router.read().unwrap();
-        if lock.get_pair(&capinfo.capability_id).is_some() {
-            return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
-                "Attempt to register duplicate capability provider: {}",
-                capinfo.capability_id
-            ))));
-        }
-    }
-
-    Ok(capinfo.capability_id)
 }
 
 /// Converts a hashmap into the CapabilityConfiguration protobuf object to
