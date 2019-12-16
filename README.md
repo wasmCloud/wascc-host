@@ -7,7 +7,7 @@
 
 The _WebAssembly Secure Capabilities Connector_ (waSCC) host library allows consumers to add actor modules, portable capability providers, and native capability providers to a single runtime host and provide each of those modules with their own unique, per-capability configuration. This allows actors to each have their own separate message broker subscriptions, key-value stores, HTTP server ports, etc.
 
-For more information on concepts, architecture, and tutorials, check out [wascc.dev](https://wasc.dev).
+For more information on concepts, architecture, and tutorials, check out [wascc.dev](https://wascc.dev).
 
 **WARNING**: The host API is currently experimental and likely to change
 
