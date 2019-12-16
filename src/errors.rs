@@ -18,6 +18,7 @@ pub enum ErrorKind {
     Authorization(String),
     IO(std::io::Error),
     CapabilityProvider(String),
+    MiscHost(String),
 }
 
 impl Error {
@@ -41,6 +42,7 @@ impl StdError for Error {
             ErrorKind::Wascap(_) => "Embedded JWT Failure",
             ErrorKind::Authorization(_) => "Module authorization failure",
             ErrorKind::CapabilityProvider(_) => "Capability provider failure",
+            ErrorKind::MiscHost(_) => "waSCC Host error",
         }
     }
 
@@ -54,6 +56,7 @@ impl StdError for Error {
             ErrorKind::Authorization(_) => None,
             ErrorKind::IO(ref err) => Some(err),
             ErrorKind::CapabilityProvider(_) => None,
+            ErrorKind::MiscHost(_) => None,
         }
     }
 }
@@ -75,6 +78,7 @@ impl fmt::Display for Error {
             ErrorKind::CapabilityProvider(ref err) => {
                 write!(f, "Capability provider error: {}", err)
             }
+            ErrorKind::MiscHost(ref err) => write!(f, "waSCC Host Error: {}", err),
         }
     }
 }

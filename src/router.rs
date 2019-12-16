@@ -25,4 +25,22 @@ impl Router {
             None => None,
         }
     }
+
+    pub fn remove_route(&mut self, id: &str) -> crate::Result<()> {
+        self.routes.remove(id);
+        Ok(())
+    }
+
+    pub fn all_capabilities(&self) -> Vec<(String, InvokerPair)> {
+        self.routes
+            .iter()
+            .filter_map(|(key, pair)| {
+                if key.contains(':') {
+                    Some((key.clone(), pair.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }

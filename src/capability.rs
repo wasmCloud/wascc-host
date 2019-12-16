@@ -8,6 +8,9 @@ use wascc_codec::capabilities::CapabilityProvider;
 pub struct Capability {
     pub(crate) capid: String,
     pub(crate) plugin: Box<dyn CapabilityProvider>,
+    // This field is solely used to keep the FFI library instance allocated for the same
+    // lifetime as the boxed plugin
+    #[allow(dead_code)]
     library: Library,
 }
 

@@ -13,21 +13,23 @@ use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
 use prost::Message;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
 use wapc::prelude::*;
 use wascap::jwt::Claims;
 use wascc_codec::core::CapabilityConfiguration;
 use wascc_codec::core::OP_CONFIGURE;
+use wascc_codec::core::OP_REMOVE_ACTOR;
 
 pub use authz::set_auth_hook;
 
 lazy_static! {
-    pub static ref ROUTER: Arc<RwLock<Router>> = {
+    pub static ref ROUTER: RwLock<Router> = {
         wapc::set_host_callback(host_callback);
-        Arc::new(RwLock::new(Router::default()))
+        RwLock::new(Router::default())
     };
+    pub static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
+        { RwLock::new(HashMap::new()) };
 }
 
 pub fn add_middleware(mid: impl Middleware) {
@@ -35,20 +37,30 @@ pub fn add_middleware(mid: impl Middleware) {
 }
 
 /// Adds a portable capability provider wasm module to the runtime host. The identity of this provider
-/// will be determined by examining the capability attestation in this actor's embedded token. 
+/// will be determined by examining the capability attestation in this actor's embedded token.
 pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
     let wg = WaitGroup::new();
-    let router = ROUTER.clone();
     listen_for_invocations(
         wg.clone(),
         actor.token.claims,
-        router,
         actor.bytes.clone(),
         Some(wasi),
         false,
     )?;
     wg.wait();
     Ok(())
+}
+
+/// Removes a portable capability provider from the host.
+pub fn remove_capability(cap_id: &str) -> Result<()> {
+    if let Some(term_s) = TERMINATORS.read().unwrap().get(cap_id) {
+        term_s.send(true).unwrap();
+        Ok(())
+    } else {
+        Err(errors::new(errors::ErrorKind::MiscHost(
+            "No such capability".into(),
+        )))
+    }
 }
 
 /// Adds an actor module to the runtime host. The identity of this module is determined
@@ -58,17 +70,28 @@ pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
 pub fn add_actor(actor: Actor) -> Result<()> {
     let wg = WaitGroup::new();
     info!("Adding actor {} to host", actor.public_key());
-    let router = ROUTER.clone();
     listen_for_invocations(
         wg.clone(),
         actor.token.claims,
-        router,
         actor.bytes.clone(),
         None,
         true,
     )?;
     wg.wait();
     Ok(())
+}
+
+/// Removes an actor from the host. Stops the thread managing the actor and notifies
+/// all capability providers to free up any associated resources being used by the actor
+pub fn remove_actor(pk: &str) -> Result<()> {
+    if let Some(term_s) = TERMINATORS.read().unwrap().get(pk) {
+        term_s.send(true).unwrap();
+        Ok(())
+    } else {
+        Err(errors::new(errors::ErrorKind::MiscHost(
+            "No such actor".into(),
+        )))
+    }
 }
 
 /// Adds a native linux dynamic library (plugin) as a capability provider to the runtime host. The
@@ -81,15 +104,23 @@ pub fn add_native_capability(capability: Capability) -> Result<()> {
         .unwrap()
         .add_plugin(capability)?;
     let wg = WaitGroup::new();
-    let router = ROUTER.clone();
-    if router.read().unwrap().get_pair(&capid).is_some() {
+    if ROUTER.read().unwrap().get_pair(&capid).is_some() {
         return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
             "Attempt to register the same capability provider multiple times: {}",
             capid
         ))));
     }
-    listen_for_native_invocations(wg.clone(), router, &capid)?;
+    listen_for_native_invocations(wg.clone(), &capid)?;
     wg.wait();
+    Ok(())
+}
+
+/// Removes a native capability provider from the host.
+pub fn remove_native_capabiltiy(capid: &str) -> Result<()> {
+    crate::plugins::PLUGMAN
+        .write()
+        .unwrap()
+        .remove_plugin(capid)?;
     Ok(())
 }
 
@@ -109,8 +140,7 @@ pub fn configure(module: &str, capid: &str, config: HashMap<String, String>) -> 
     );
     let capid = capid.to_string();
     let module = module.to_string();
-    let router = ROUTER.clone();
-    let pair = router.read().unwrap().get_pair(&capid);
+    let pair = ROUTER.read().unwrap().get_pair(&capid);
     match pair {
         Some(pair) => {
             trace!("Sending configuration to {}", capid);
@@ -140,17 +170,14 @@ pub fn configure(module: &str, capid: &str, config: HashMap<String, String>) -> 
 /// perform invocations on an actor module via the channels inside the dispatcher. Invocations
 /// pulled off the channel are then invoked by looking up the target capability ID on the
 /// router and invoking via the channels from the router.
-fn listen_for_native_invocations(
-    wg: WaitGroup,
-    router: Arc<RwLock<Router>>,
-    capid: &str,
-) -> Result<()> {
+fn listen_for_native_invocations(wg: WaitGroup, capid: &str) -> Result<()> {
     let capid = capid.to_string();
 
     thread::spawn(move || {
         let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
         let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
             channel::unbounded();
+        let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
         let dispatcher = WasccNativeDispatcher::new(resp_r.clone(), inv_s.clone(), &capid);
         crate::plugins::PLUGMAN
             .write()
@@ -158,45 +185,57 @@ fn listen_for_native_invocations(
             .register_dispatcher(&capid, dispatcher)
             .unwrap();
 
-        {
-            let mut lock = router.write().unwrap();
-            lock.add_route(capid.to_string(), inv_s, resp_r);
-        }
+        ROUTER
+            .write()
+            .unwrap()
+            .add_route(capid.to_string(), inv_s, resp_r);
+        TERMINATORS.write().unwrap().insert(capid.clone(), term_s);
 
         info!("Native capability provider '{}' ready", capid);
         drop(wg);
 
         loop {
-            if let Ok(inv) = inv_r.recv() {
-                let v: Vec<_> = inv.operation.split('!').collect();
-                let target = v[0];
-                info!(
-                    "Capability {} received invocation for target {}",
-                    capid, target
-                );
+            select! {
+                recv(inv_r) -> inv => {
+                    if let Ok(inv) = inv {
+                        let v: Vec<_> = inv.operation.split('!').collect();
+                        let target = v[0];
+                        info!(
+                            "Capability {} received invocation for target {}",
+                            capid, target
+                        );
 
-                let inv_r = if target == capid {
-                    // if target of invocation is this particular capability,
-                    // then perform the invocation on the plugin
-                    middleware::invoke_capability(inv).unwrap()
-                } else {
-                    // Capability is handling a dispatch (delivering) to actor module
-                    if !authz::can_invoke(target, &capid) {
-                        InvocationResponse::error(&format!(
-                            "Dispatch between actor and unauthorized capability: {} <-> {}",
-                            target, capid
-                        ))
-                    } else {
-                        let pair = router.read().unwrap().get_pair(target);
-                        match pair {
-                            Some(ref p) => {
-                                invoke(p, capid.clone(), &inv.operation, &inv.msg).unwrap()
+                        let inv_r = if target == capid {
+                            // if target of invocation is this particular capability,
+                            // then perform the invocation on the plugin
+                            middleware::invoke_capability(inv).unwrap()
+                        } else {
+                            // Capability is handling a dispatch (delivering) to actor module
+                            if !authz::can_invoke(target, &capid) {
+                                InvocationResponse::error(&format!(
+                                    "Dispatch between actor and unauthorized capability: {} <-> {}",
+                                    target, capid
+                                ))
+                            } else {
+                                let pair = ROUTER.read().unwrap().get_pair(target);
+                                match pair {
+                                    Some(ref p) => {
+                                        invoke(p, capid.clone(), &inv.operation, &inv.msg).unwrap()
+                                    }
+                                    None => InvocationResponse::error("Dispatch to unknown actor"),
+                                }
                             }
-                            None => InvocationResponse::error("Dispatch to unknown actor"),
-                        }
+                        };
+                        resp_s.send(inv_r).unwrap();
                     }
-                };
-                resp_s.send(inv_r).unwrap();
+
+                },
+                recv(term_r) -> _term => {
+                    info!("Terminating native capability provider {}", capid);
+                    TERMINATORS.write().unwrap().remove(&capid);
+                    ROUTER.write().unwrap().remove_route(&capid).unwrap();
+                    break;
+                }
             }
         }
     });
@@ -209,7 +248,6 @@ fn listen_for_native_invocations(
 fn listen_for_invocations(
     wg: WaitGroup,
     claims: Claims,
-    router: Arc<RwLock<Router>>,
     buf: Vec<u8>,
     wasi: Option<WasiParams>,
     actor: bool,
@@ -224,33 +262,78 @@ fn listen_for_invocations(
         let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
         let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
             channel::unbounded();
+        let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
 
-        {
+        let route_key = {
             let route_key = if actor {
                 claims.subject
             } else {
-                claims.caps.unwrap()[0].to_string() // If we can't unwrap this, the cap is bad, so panic is fine                
+                claims.caps.unwrap()[0].to_string() // If we can't unwrap this, the cap is bad, so panic is fine
             };
-            let mut lock = router.write().unwrap();
-            lock.add_route(route_key.clone(), inv_s, resp_r);
+            ROUTER
+                .write()
+                .unwrap()
+                .add_route(route_key.clone(), inv_s, resp_r);
+            TERMINATORS
+                .write()
+                .unwrap()
+                .insert(route_key.clone(), term_s);
             info!(
                 "Actor {} ready for communications, capability: {}",
                 route_key, !actor
             );
-        }
+            route_key
+        };
         drop(wg); // API call that spawned this thread can now unblock
 
         loop {
-            if let Ok(inv) = inv_r.recv() {
-                let v: Vec<_> = inv.operation.split('!').collect();
-                let inv = Invocation::new(inv.origin, v[1], inv.msg); // Remove routing prefix from operation
-                let inv_r = middleware::invoke_actor(inv, &mut guest).unwrap();
-                resp_s.send(inv_r).unwrap();
+            select! {
+                recv(inv_r) -> inv => {
+                    if let Ok(inv) = inv {
+                        let v: Vec<_> = inv.operation.split('!').collect();
+                        let inv = Invocation::new(inv.origin, v[1], inv.msg); // Remove routing prefix from operation
+                        let inv_r = middleware::invoke_actor(inv, &mut guest).unwrap();
+                        resp_s.send(inv_r).unwrap();
+                    }
+
+                },
+                recv(term_r) -> _term => {
+                    info!("Terminating {} {}", if actor { "actor" } else { "capability" }, route_key);
+                    if actor {
+                        deconfigure_actor(&route_key);
+                    }
+                    TERMINATORS.write().unwrap().remove(&route_key);
+                    ROUTER.write().unwrap().remove_route(&route_key).unwrap();
+                    break;
+                }
             }
         }
     });
 
     Ok(())
+}
+
+fn deconfigure_actor(key: &str) {
+    let cfg = CapabilityConfiguration {
+        module: key.to_string(),
+        values: HashMap::new(),
+    };
+    let mut buf = Vec::new();
+    cfg.encode(&mut buf).unwrap();
+    ROUTER
+        .read()
+        .unwrap()
+        .all_capabilities()
+        .iter()
+        .for_each(|(capid, (sender, receiver))| {
+            let inv = Invocation {
+                origin: "system".to_string(),
+                msg: buf.clone(),
+                operation: format!("{}!{}", capid, OP_REMOVE_ACTOR),
+            };
+            sender.send(inv).unwrap();
+            let _res = receiver.recv().unwrap();
+        });
 }
 
 /// This function is called by the underlying waPC host in response to a guest module
@@ -276,7 +359,6 @@ fn host_callback(
     let pair = ROUTER.read().unwrap().get_pair(capability_id);
     match pair {
         Some((inv_s, resp_r)) => {
-            info!("invoking");
             inv_s.send(Invocation::new(authz::pk_for_id(id), op, payload.to_vec()))?;
             match resp_r.recv() {
                 Ok(ir) => Ok(ir.msg),
@@ -286,7 +368,7 @@ fn host_callback(
             }
         }
         None => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
-            "dispatch to non-existent capability".into(),
+            "Attempt to make host call into non-existent target".into(),
         )))),
     }
 }

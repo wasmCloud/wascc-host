@@ -80,4 +80,11 @@ impl PluginManager {
             Ok(())
         }
     }
+
+    pub fn remove_plugin(&mut self, capid: &str) -> Result<()> {
+        if let Some(plugin) = self.plugins.remove(capid) {
+            drop(plugin);
+        }
+        Ok(())
+    }
 }

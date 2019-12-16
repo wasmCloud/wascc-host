@@ -4,6 +4,9 @@ extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
+#[macro_use]
+extern crate crossbeam;
+
 pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
 pub use capability::Capability;
