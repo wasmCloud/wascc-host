@@ -24,8 +24,7 @@ use wascc_codec::core::OP_REMOVE_ACTOR;
 pub use authz::set_auth_hook;
 
 lazy_static! {
-    pub static ref ROUTER: RwLock<Router> = {
-        wapc::set_host_callback(host_callback);
+    pub static ref ROUTER: RwLock<Router> = {        
         RwLock::new(Router::default())
     };
     pub static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
@@ -257,7 +256,7 @@ fn listen_for_invocations(
             "Loading {} module...",
             if actor { "actor" } else { "capability" }
         );
-        let mut guest = WapcHost::new(&buf, wasi).unwrap();
+        let mut guest = WapcHost::new(host_callback, &buf, wasi).unwrap();
         authz::map_claims(guest.id(), &claims.subject);
         let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
         let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
