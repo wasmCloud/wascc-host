@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use wascc_host::{host, Actor, Capability};
+use wascc_host::{host, Actor, NativeCapability};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     host::add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
     host::add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
-    host::add_native_capability(Capability::from_file(
+    host::add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
     )?)?;
 

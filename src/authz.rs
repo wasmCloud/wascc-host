@@ -1,3 +1,17 @@
+// Copyright 2015-2019 Capital One Services, LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::errors;
 use crate::Result;
 use std::collections::HashMap;
@@ -16,12 +30,24 @@ lazy_static! {
 
 type AuthHook = dyn Fn(&Token) -> bool + Sync + Send + 'static;
 
+/// Setting a custom authorization hook allows your code to make additional decisions
+/// on whether or not a given actor is allowed to run within the host. The authorization
+/// hook takes a `Token` as input and returns a boolean indicating the validity of the module.
 #[allow(dead_code)]
 pub fn set_auth_hook<F>(hook: F)
 where
     F: Fn(&Token) -> bool + Sync + Send + 'static,
 {
     *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
+}
+
+pub(crate) fn get_all_claims() -> Vec<(String, Claims)> {
+    CLAIMS
+        .read()
+        .unwrap()
+        .iter()
+        .map(|(pk, claims)| (pk.clone(), claims.clone()))
+        .collect()
 }
 
 pub(crate) fn check_auth(token: &Token) -> bool {
@@ -70,6 +96,10 @@ pub(crate) fn can_invoke(pk: &str, capability_id: &str) -> bool {
             .as_ref()
             .map_or(false, |caps| caps.contains(&capability_id.to_string()))
     })
+}
+
+pub(crate) fn get_claims(pk: &str) -> Option<Claims> {
+    CLAIMS.read().unwrap().get(pk).cloned()
 }
 
 /// Extract claims from the JWT embedded in the wasm module's custom section

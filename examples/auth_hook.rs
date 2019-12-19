@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use wascap::jwt::Token;
-use wascc_host::{host, Actor, Capability};
+use wascc_host::{host, Actor, NativeCapability};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     host::set_auth_hook(verify_issuer); // This MUST be set before you load an actor, otherwise it won't run
     host::add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
-    host::add_native_capability(Capability::from_file(
+    host::add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
     )?)?;
 

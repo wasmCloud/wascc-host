@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::capability::Capability;
+use crate::capability::NativeCapability;
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors::{self, ErrorKind};
 use crate::host::Invocation;
@@ -27,8 +27,8 @@ lazy_static! {
 
 #[derive(Default)]
 pub(crate) struct PluginManager {
-    plugins: HashMap<String, Capability>, //plugins: HashMap<String, Box<dyn CapabilityProvider>>,
-                                          //loaded_libraries: HashMap<String, Library>
+    plugins: HashMap<String, NativeCapability>, //plugins: HashMap<String, Box<dyn CapabilityProvider>>,
+                                                //loaded_libraries: HashMap<String, Library>
 }
 
 impl PluginManager {
@@ -69,7 +69,7 @@ impl PluginManager {
         }
     }
 
-    pub fn add_plugin(&mut self, plugin: Capability) -> Result<()> {
+    pub fn add_plugin(&mut self, plugin: NativeCapability) -> Result<()> {
         if self.plugins.contains_key(&plugin.capid) {
             Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Duplicate capability ID attempted to register provider: {}",

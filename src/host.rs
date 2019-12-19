@@ -1,8 +1,24 @@
+//! The main interface for managing a waSCC host
+
+// Copyright 2015-2019 Capital One Services, LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use super::router::Router;
 use super::Result;
 use crate::actor::Actor;
 use crate::authz;
-use crate::capability::Capability;
+use crate::capability::NativeCapability;
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors;
 use crate::middleware;
@@ -24,13 +40,12 @@ use wascc_codec::core::OP_REMOVE_ACTOR;
 pub use authz::set_auth_hook;
 
 lazy_static! {
-    pub static ref ROUTER: RwLock<Router> = {        
-        RwLock::new(Router::default())
-    };
-    pub static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
+    pub(crate) static ref ROUTER: RwLock<Router> = { RwLock::new(Router::default()) };
+    pub(crate) static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
         { RwLock::new(HashMap::new()) };
 }
 
+/// Adds a middleware trait object to the middleware processing pipeline.
 pub fn add_middleware(mid: impl Middleware) {
     middleware::MIDDLEWARES.write().unwrap().push(Box::new(mid));
 }
@@ -81,7 +96,9 @@ pub fn add_actor(actor: Actor) -> Result<()> {
 }
 
 /// Removes an actor from the host. Stops the thread managing the actor and notifies
-/// all capability providers to free up any associated resources being used by the actor
+/// all capability providers to free up any associated resources being used by the actor. Because
+/// this removal is _asynchronous_, the `actors` function might not immediately report
+/// the change.
 pub fn remove_actor(pk: &str) -> Result<()> {
     if let Some(term_s) = TERMINATORS.read().unwrap().get(pk) {
         term_s.send(true).unwrap();
@@ -93,10 +110,27 @@ pub fn remove_actor(pk: &str) -> Result<()> {
     }
 }
 
+/// Retrieves the list of all actors running in the host, returning a tuple of each
+/// actor's primary key and that actor's security claims. The order in which the actors
+/// appear in the resulting vector is _not guaranteed_. **NOTE** - Because actors are added and 
+/// removed asynchronously, this function returns a view of the actors only as seen at
+/// the moment the function is invoked.
+pub fn actors() -> Vec<(String, Claims)> {
+    authz::get_all_claims()
+}
+
+/// Retrieves the security claims for a given actor. Returns `None` if that actor is
+/// not running in the host. Actors are added and removed asynchronously, and actors are
+/// not visible until fully running, so if you attempt to query an actor's claims 
+/// immediately after calling `add_actor`, this function might (correctly) return `None`
+pub fn actor_claims(pk: &str) -> Option<Claims> {
+    authz::get_claims(pk)
+}
+
 /// Adds a native linux dynamic library (plugin) as a capability provider to the runtime host. The
 /// identity and other metadata about this provider is determined by loading the plugin from disk
-/// and invoking the appropriate plugin trait methods.
-pub fn add_native_capability(capability: Capability) -> Result<()> {
+/// and invoking the appropriate plugin trait methods. 
+pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
     let capid = capability.capid.clone();
     crate::plugins::PLUGMAN
         .write()
@@ -400,6 +434,7 @@ fn gen_config_proto(module: &str, values: HashMap<String, String>) -> Vec<u8> {
     buf
 }
 
+/// An immutable representation of an invocation within waSCC
 #[derive(Debug, Clone)]
 pub struct Invocation {
     pub origin: String,
@@ -417,6 +452,7 @@ impl Invocation {
     }
 }
 
+/// The response to an invocation
 #[derive(Debug, Clone)]
 pub struct InvocationResponse {
     pub msg: Vec<u8>,
