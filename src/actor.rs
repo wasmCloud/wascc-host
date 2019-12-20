@@ -29,7 +29,7 @@ pub struct Actor {
 impl Actor {
     /// Create an actor from the bytes (must be a signed module) of a WebAssembly module
     pub fn from_bytes(buf: Vec<u8>) -> Result<Actor> {
-        let token = authz::extract_and_store_claims(&buf)?;
+        let token = authz::extract_claims(&buf)?;
         Ok(Actor { token, bytes: buf })
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -11,7 +11,11 @@ readme = "README.md"
 keywords = ["webassembly", "wasm", "wasi", "wascc", "wapc"]
 categories = ["wasm", "api-bindings","command-line-utilities"]
 exclude = ["examples/.assets"]
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[badges]
+maintenance = { status = "actively-developed" }
+travis-ci = { repository = "wascc/wascc-host", branch = "master" }
+
 
 [dependencies]
 libloading = "0.5.2"
@@ -22,7 +26,6 @@ wapc = "0.2.0"
 wascc-codec = "0.3.4"
 wascap = "0.1.3"
 prost = "0.5.0"
-#bytes = "0.4.12"
 log = "0.4.8"
 env_logger = "0.7.1"
 lazy_static = "1.4.0"

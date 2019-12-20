@@ -18,8 +18,8 @@ use libloading::Symbol;
 use std::ffi::OsStr;
 use wascc_codec::capabilities::CapabilityProvider;
 
-/// Represents a native capability provider compiled as a shared object library. 
-/// These plugins are OS-specific, so they will be `.so` files on Linux, `.dylib` 
+/// Represents a native capability provider compiled as a shared object library.
+/// These plugins are OS-specific, so they will be `.so` files on Linux, `.dylib`
 /// files on macOS, etc.
 pub struct NativeCapability {
     pub(crate) capid: String,

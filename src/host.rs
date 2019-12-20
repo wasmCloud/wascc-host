@@ -35,6 +35,7 @@ use wapc::prelude::*;
 use wascap::jwt::Claims;
 use wascc_codec::core::CapabilityConfiguration;
 use wascc_codec::core::OP_CONFIGURE;
+use wascc_codec::core::OP_PERFORM_LIVE_UPDATE;
 use wascc_codec::core::OP_REMOVE_ACTOR;
 
 pub use authz::set_auth_hook;
@@ -95,6 +96,34 @@ pub fn add_actor(actor: Actor) -> Result<()> {
     Ok(())
 }
 
+/// Replaces one running actor with another live actor with no message loss. Note that
+/// the time it takes to perform this replacement can cause pending messages from capability
+/// providers (e.g. messages from subscriptions or HTTP requests) to build up in a backlog,
+/// so make sure the new actor can handle this stream of these delayed messages
+pub fn replace_actor(new_actor: Actor) -> Result<()> {
+    let public_key = new_actor.token.claims.subject;
+
+    match ROUTER.read().unwrap().get_pair(&public_key) {
+        Some(ref p) => {
+            match invoke(
+                p,
+                "system".into(),
+                &format!("{}!{}", public_key, OP_PERFORM_LIVE_UPDATE),
+                &new_actor.bytes,
+            ) {
+                Ok(_) => {
+                    info!("Actor {} replaced", public_key);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        None => Err(errors::new(errors::ErrorKind::MiscHost(
+            "Cannot replace non-existent actor".into(),
+        ))),
+    }
+}
+
 /// Removes an actor from the host. Stops the thread managing the actor and notifies
 /// all capability providers to free up any associated resources being used by the actor. Because
 /// this removal is _asynchronous_, the `actors` function might not immediately report
@@ -112,7 +141,7 @@ pub fn remove_actor(pk: &str) -> Result<()> {
 
 /// Retrieves the list of all actors running in the host, returning a tuple of each
 /// actor's primary key and that actor's security claims. The order in which the actors
-/// appear in the resulting vector is _not guaranteed_. **NOTE** - Because actors are added and 
+/// appear in the resulting vector is _not guaranteed_. **NOTE** - Because actors are added and
 /// removed asynchronously, this function returns a view of the actors only as seen at
 /// the moment the function is invoked.
 pub fn actors() -> Vec<(String, Claims)> {
@@ -121,7 +150,7 @@ pub fn actors() -> Vec<(String, Claims)> {
 
 /// Retrieves the security claims for a given actor. Returns `None` if that actor is
 /// not running in the host. Actors are added and removed asynchronously, and actors are
-/// not visible until fully running, so if you attempt to query an actor's claims 
+/// not visible until fully running, so if you attempt to query an actor's claims
 /// immediately after calling `add_actor`, this function might (correctly) return `None`
 pub fn actor_claims(pk: &str) -> Option<Claims> {
     authz::get_claims(pk)
@@ -129,7 +158,7 @@ pub fn actor_claims(pk: &str) -> Option<Claims> {
 
 /// Adds a native linux dynamic library (plugin) as a capability provider to the runtime host. The
 /// identity and other metadata about this provider is determined by loading the plugin from disk
-/// and invoking the appropriate plugin trait methods. 
+/// and invoking the appropriate plugin trait methods.
 pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
     let capid = capability.capid.clone();
     crate::plugins::PLUGMAN
@@ -291,6 +320,7 @@ fn listen_for_invocations(
             if actor { "actor" } else { "capability" }
         );
         let mut guest = WapcHost::new(host_callback, &buf, wasi).unwrap();
+        authz::store_claims(claims.clone()).unwrap();
         authz::map_claims(guest.id(), &claims.subject);
         let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
         let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
@@ -312,8 +342,13 @@ fn listen_for_invocations(
                 .unwrap()
                 .insert(route_key.clone(), term_s);
             info!(
-                "Actor {} ready for communications, capability: {}",
-                route_key, !actor
+                "{} {} ready for communications",
+                if actor {
+                    "Actor"
+                } else {
+                    "Portable capability"
+                },
+                route_key
             );
             route_key
         };
@@ -325,6 +360,10 @@ fn listen_for_invocations(
                     if let Ok(inv) = inv {
                         let v: Vec<_> = inv.operation.split('!').collect();
                         let inv = Invocation::new(inv.origin, v[1], inv.msg); // Remove routing prefix from operation
+                        if inv.operation == OP_PERFORM_LIVE_UPDATE {
+                            resp_s.send(live_update(&mut guest, &inv)).unwrap();
+                            continue;
+                        }
                         let inv_r = middleware::invoke_actor(inv, &mut guest).unwrap();
                         resp_s.send(inv_r).unwrap();
                     }
@@ -344,6 +383,16 @@ fn listen_for_invocations(
     });
 
     Ok(())
+}
+
+fn live_update(guest: &mut WapcHost, inv: &Invocation) -> InvocationResponse {
+    match guest.replace_module(&inv.msg) {
+        Ok(_) => InvocationResponse::success(vec![]),
+        Err(e) => {
+            error!("Failed to perform hot swap, ignoring message: {}", e);
+            InvocationResponse::error("Failed to perform hot swap")
+        }
+    }
 }
 
 fn deconfigure_actor(key: &str) {

@@ -103,9 +103,7 @@ pub(crate) fn get_claims(pk: &str) -> Option<Claims> {
 }
 
 /// Extract claims from the JWT embedded in the wasm module's custom section
-/// and then store them in the static hashmap correlating module public
-/// keys with their claims
-pub(crate) fn extract_and_store_claims(buf: &[u8]) -> Result<wascap::jwt::Token> {
+pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token> {
     let token = wascap::wasm::extract_claims(buf)?;
     match token {
         Some(token) => {
@@ -120,7 +118,6 @@ pub(crate) fn extract_and_store_claims(buf: &[u8]) -> Result<wascap::jwt::Token>
                 "Discovered capability attestations: {}",
                 token.claims.caps.clone().unwrap().join(",")
             );
-            store_claims(token.claims.clone())?;
             Ok(token)
         }
         None => Err(errors::new(errors::ErrorKind::Authorization(
