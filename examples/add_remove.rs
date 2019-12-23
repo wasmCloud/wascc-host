@@ -20,7 +20,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         generate_port_config(8082),
     )?;
 
+    // Need to wait until the HTTP server finishes starting before we 
+    // should try and kill it.
+    std::thread::sleep(std::time::Duration::from_millis(800));
+
+    // This will terminate the actor and free up the HTTP port
     host::remove_actor("MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2")?;
+
+    // ..
+    // at this point, curling on port 8081 should fail w/connection refused 
+    // while curling on port 8082 should work just fine
 
     std::thread::park();
 
