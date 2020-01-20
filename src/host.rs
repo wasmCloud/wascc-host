@@ -66,6 +66,30 @@ pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
     Ok(())
 }
 
+/// Manually dispatches an operation and an opaque binary payload to an actor as if it 
+/// came from a capability. The origin of this message will be `system`. Use this function
+/// to perform integration or acceptance tests on actors within a host, or if your host has
+/// special invocations that it knows it must call on actors.
+pub fn call(actor: &str, op: &str, msg: &[u8]) -> Result<Vec<u8>> {
+    if actor.contains(':') {
+        return Err(errors::new(errors::ErrorKind::MiscHost(
+            "Cannot invoke capability providers through host without an actor".into()
+        )));
+    }
+    let router = ROUTER.read().unwrap();
+    let pair = router.get_pair(actor);
+    match pair {
+        Some(ref p) => {
+            match invoke(p, "system".to_string(), op, msg)  {
+                Ok(resp) => Ok(resp.msg),             
+                Err(e) => Err(e)
+            }
+        },
+        None => Err(errors::new(errors::ErrorKind::MiscHost(
+            "No such actor".into())))
+    }    
+}
+
 /// Removes a portable capability provider from the host.
 pub fn remove_capability(cap_id: &str) -> Result<()> {
     if let Some(term_s) = TERMINATORS.read().unwrap().get(cap_id) {

@@ -62,7 +62,7 @@ pub(crate) fn store_claims(claims: Claims) -> Result<()> {
     CLAIMS
         .write()
         .unwrap()
-        .insert(claims.subject.clone(), claims.clone());
+        .insert(claims.subject.clone(), claims);
     Ok(())
 }
 

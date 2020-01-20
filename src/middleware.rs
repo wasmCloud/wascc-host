@@ -77,7 +77,7 @@ fn run_actor_pre_invoke(
     inv: Invocation,
     middlewares: &[Box<dyn Middleware>],
 ) -> Result<Invocation> {
-    let mut cur_inv = inv.clone();
+    let mut cur_inv = inv;
     for m in middlewares {
         match m.actor_pre_invoke(cur_inv) {
             Ok(i) => cur_inv = i.clone(),
@@ -91,7 +91,7 @@ fn run_actor_post_invoke(
     resp: InvocationResponse,
     middlewares: &[Box<dyn Middleware>],
 ) -> Result<InvocationResponse> {
-    let mut cur_resp = resp.clone();
+    let mut cur_resp = resp;
     for m in middlewares {
         match m.actor_post_invoke(cur_resp) {
             Ok(i) => cur_resp = i.clone(),
@@ -105,7 +105,7 @@ pub(crate) fn run_capability_pre_invoke(
     inv: Invocation,
     middlewares: &[Box<dyn Middleware>],
 ) -> Result<Invocation> {
-    let mut cur_inv = inv.clone();
+    let mut cur_inv = inv;
     for m in middlewares {
         match m.capability_pre_invoke(cur_inv) {
             Ok(i) => cur_inv = i.clone(),
@@ -119,7 +119,7 @@ pub(crate) fn run_capability_post_invoke(
     resp: InvocationResponse,
     middlewares: &[Box<dyn Middleware>],
 ) -> Result<InvocationResponse> {
-    let mut cur_resp = resp.clone();
+    let mut cur_resp = resp;
     for m in middlewares {
         match m.capability_post_invoke(cur_resp) {
             Ok(i) => cur_resp = i.clone(),
