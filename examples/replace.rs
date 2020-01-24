@@ -30,7 +30,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     io::stdin().read_line(&mut input)?;
     // Note that we don't supply the public key of the one to replace, it
     // comes straight from the Actor being replaced. You cannot replace actors
-    // that do not have the same public key as a security measure against 
+    // that do not have the same public key as a security measure against
     // malicious code
     host::replace_actor(Actor::from_file(
         "./examples/.assets/kvcounter_tweaked.wasm",

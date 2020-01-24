@@ -18,6 +18,13 @@ use libloading::Symbol;
 use std::ffi::OsStr;
 use wascc_codec::capabilities::CapabilityProvider;
 
+#[derive(Debug, Clone)]
+pub struct CapabilitySummary {
+    pub name: String,
+    pub id: String,
+    pub portable: bool,
+}
+
 /// Represents a native capability provider compiled as a shared object library.
 /// These plugins are OS-specific, so they will be `.so` files on Linux, `.dylib`
 /// files on macOS, etc.
@@ -56,5 +63,13 @@ impl NativeCapability {
             plugin,
             library,
         })
+    }
+
+    pub fn id(&self) -> String {
+        self.capid.clone()
+    }
+
+    pub fn name(&self) -> String {
+        self.plugin.name().to_string()
     }
 }
