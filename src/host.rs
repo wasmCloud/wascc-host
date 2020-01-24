@@ -18,11 +18,12 @@ use super::router::Router;
 use super::Result;
 use crate::actor::Actor;
 use crate::authz;
-use crate::capability::NativeCapability;
+use crate::capability::{CapabilitySummary, NativeCapability};
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors;
 use crate::middleware;
 use crate::middleware::Middleware;
+use crate::plugins::PLUGMAN;
 use crate::router::InvokerPair;
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
@@ -33,14 +34,14 @@ use std::sync::RwLock;
 use std::thread;
 use wapc::prelude::*;
 use wascap::jwt::Claims;
-use wascc_codec::core::CapabilityConfiguration;
-use wascc_codec::core::OP_CONFIGURE;
-use wascc_codec::core::OP_PERFORM_LIVE_UPDATE;
-use wascc_codec::core::OP_REMOVE_ACTOR;
+use wascc_codec::core::{
+    CapabilityConfiguration, OP_CONFIGURE, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR,
+};
 
 pub use authz::set_auth_hook;
 
 lazy_static! {
+    pub(crate) static ref CAPS: RwLock<Vec<CapabilitySummary>> = { RwLock::new(Vec::new()) };
     pub(crate) static ref ROUTER: RwLock<Router> = { RwLock::new(Router::default()) };
     pub(crate) static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
         { RwLock::new(HashMap::new()) };
@@ -66,28 +67,27 @@ pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
     Ok(())
 }
 
-/// Manually dispatches an operation and an opaque binary payload to an actor as if it 
+/// Manually dispatches an operation and an opaque binary payload to an actor as if it
 /// came from a capability. The origin of this message will be `system`. Use this function
 /// to perform integration or acceptance tests on actors within a host, or if your host has
 /// special invocations that it knows it must call on actors.
 pub fn call(actor: &str, op: &str, msg: &[u8]) -> Result<Vec<u8>> {
     if actor.contains(':') {
         return Err(errors::new(errors::ErrorKind::MiscHost(
-            "Cannot invoke capability providers through host without an actor".into()
+            "Cannot invoke capability providers through host instead of from an actor".into(),
         )));
     }
     let router = ROUTER.read().unwrap();
     let pair = router.get_pair(actor);
     match pair {
-        Some(ref p) => {
-            match invoke(p, "system".to_string(), op, msg)  {
-                Ok(resp) => Ok(resp.msg),             
-                Err(e) => Err(e)
-            }
+        Some(ref p) => match invoke(p, "system".to_string(), op, msg) {
+            Ok(resp) => Ok(resp.msg),
+            Err(e) => Err(e),
         },
         None => Err(errors::new(errors::ErrorKind::MiscHost(
-            "No such actor".into())))
-    }    
+            "No such actor".into(),
+        ))),
+    }
 }
 
 /// Removes a portable capability provider from the host.
@@ -172,6 +172,12 @@ pub fn actors() -> Vec<(String, Claims)> {
     authz::get_all_claims()
 }
 
+/// Retrieves a list of all of the currently registered capability ID
+pub fn capabilities() -> Vec<CapabilitySummary> {
+    let lock = CAPS.read().unwrap();
+    lock.iter().cloned().collect()
+}
+
 /// Retrieves the security claims for a given actor. Returns `None` if that actor is
 /// not running in the host. Actors are added and removed asynchronously, and actors are
 /// not visible until fully running, so if you attempt to query an actor's claims
@@ -185,17 +191,23 @@ pub fn actor_claims(pk: &str) -> Option<Claims> {
 /// and invoking the appropriate plugin trait methods.
 pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
     let capid = capability.capid.clone();
-    crate::plugins::PLUGMAN
-        .write()
-        .unwrap()
-        .add_plugin(capability)?;
-    let wg = WaitGroup::new();
     if ROUTER.read().unwrap().get_pair(&capid).is_some() {
         return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
             "Attempt to register the same capability provider multiple times: {}",
             capid
         ))));
     }
+    let summary = CapabilitySummary {
+        id: capid.clone(),
+        name: capability.name(),
+        portable: false,
+    };
+    CAPS.write().unwrap().push(summary);
+    crate::plugins::PLUGMAN
+        .write()
+        .unwrap()
+        .add_plugin(capability)?;
+    let wg = WaitGroup::new();
     listen_for_native_invocations(wg.clone(), &capid)?;
     wg.wait();
     Ok(())
@@ -203,10 +215,18 @@ pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
 
 /// Removes a native capability provider from the host.
 pub fn remove_native_capabiltiy(capid: &str) -> Result<()> {
-    crate::plugins::PLUGMAN
-        .write()
-        .unwrap()
-        .remove_plugin(capid)?;
+    if let Some(term_s) = TERMINATORS.read().unwrap().get(capid) {
+        term_s.send(true).unwrap();
+        Ok(())
+    } else {
+        Err(errors::new(errors::ErrorKind::MiscHost(
+            "No such capability".into(),
+        )))
+    }
+}
+
+fn remove_cap(capid: &str) -> Result<()> {
+    CAPS.write().unwrap().retain(|c| c.id != capid);
     Ok(())
 }
 
@@ -314,10 +334,11 @@ fn listen_for_native_invocations(wg: WaitGroup, capid: &str) -> Result<()> {
                         };
                         resp_s.send(inv_r).unwrap();
                     }
-
                 },
                 recv(term_r) -> _term => {
                     info!("Terminating native capability provider {}", capid);
+                    remove_cap(&capid).unwrap();
+                    PLUGMAN.write().unwrap().remove_plugin(&capid).unwrap();
                     TERMINATORS.write().unwrap().remove(&capid);
                     ROUTER.write().unwrap().remove_route(&capid).unwrap();
                     break;
@@ -353,7 +374,7 @@ fn listen_for_invocations(
 
         let route_key = {
             let route_key = if actor {
-                claims.subject
+                claims.subject.clone()
             } else {
                 claims.caps.unwrap()[0].to_string() // If we can't unwrap this, the cap is bad, so panic is fine
             };
@@ -365,6 +386,13 @@ fn listen_for_invocations(
                 .write()
                 .unwrap()
                 .insert(route_key.clone(), term_s);
+            if !actor {
+                CAPS.write().unwrap().push(CapabilitySummary {
+                    id: route_key.clone(),
+                    name: route_key.clone(),
+                    portable: true,
+                });
+            }
             info!(
                 "{} {} ready for communications",
                 if actor {
@@ -397,7 +425,10 @@ fn listen_for_invocations(
                     info!("Terminating {} {}", if actor { "actor" } else { "capability" }, route_key);
                     if actor {
                         deconfigure_actor(&route_key);
+                    } else {
+                        remove_cap(&route_key).unwrap();
                     }
+                    authz::remove_claims(&claims.subject).unwrap();
                     TERMINATORS.write().unwrap().remove(&route_key);
                     ROUTER.write().unwrap().remove_route(&route_key).unwrap();
                     break;

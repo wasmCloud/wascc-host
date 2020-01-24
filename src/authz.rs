@@ -66,6 +66,11 @@ pub(crate) fn store_claims(claims: Claims) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn remove_claims(subject: &str) -> Result<()> {
+    CLAIMS.write().unwrap().remove(subject);
+    Ok(())
+}
+
 pub(crate) fn map_claims(id: u64, public_key: &str) {
     CLAIMS_MAP
         .write()
