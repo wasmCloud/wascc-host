@@ -214,7 +214,7 @@ pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
 }
 
 /// Removes a native capability provider from the host.
-pub fn remove_native_capabiltiy(capid: &str) -> Result<()> {
+pub fn remove_native_capability(capid: &str) -> Result<()> {
     if let Some(term_s) = TERMINATORS.read().unwrap().get(capid) {
         term_s.send(true).unwrap();
         Ok(())

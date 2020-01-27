@@ -24,7 +24,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )?;
 
     println!(
-        "curl localhost:8081/counter1 to test, then press ENTER to replace with a new version"
+        "**> curl localhost:8081/counter1 to test, then press ENTER to replace with a new version"
     );
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -35,7 +35,20 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     host::replace_actor(Actor::from_file(
         "./examples/.assets/kvcounter_tweaked.wasm",
     )?)?;
-    println!("KV counter replaced, issue query to see the new module running.");
+    println!("**> KV counter replaced, issue query to see the new module running.");
+
+    println!("**> Press ENTER to remove the key-value provider");
+    io::stdin().read_line(&mut input)?;
+    host::remove_native_capability("wascc:keyvalue")?; 
+
+    println!("**> Press ENTER to add an in-memory key-value provider");
+    io::stdin().read_line(&mut input)?;
+    host::add_native_capability(NativeCapability::from_file(
+        "./examples/.assets/libkeyvalue.so",
+    )?)?;
+
+    println!("**> Now your counter should have started over.");
+
 
     std::thread::park();
 
