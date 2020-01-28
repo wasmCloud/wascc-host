@@ -49,8 +49,9 @@
 //!    )?;
 //!
 //!    assert_eq!(2, host::actors().len());
-//!    if let Some(claims) = host::actor_claims("MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2") {
-//!        assert!(claims.caps.unwrap().contains(&"wascc:http_server".to_string()));   
+//!    if let Some(ref claims) = host::actor_claims("MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2") {
+//!        let md = claims.metadata.as_ref().unwrap();
+//!        assert!(md.caps.as_ref().unwrap().contains(&"wascc:http_server".to_string()));   
 //!    }
 //!    
 //!
