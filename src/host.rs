@@ -376,7 +376,7 @@ fn listen_for_invocations(
             let route_key = if actor {
                 claims.subject.clone()
             } else {
-                claims.caps.unwrap()[0].to_string() // If we can't unwrap this, the cap is bad, so panic is fine
+                claims.metadata.unwrap().caps.unwrap()[0].to_string() // If we can't unwrap this, the cap is bad, so panic is fine
             };
             ROUTER
                 .write()

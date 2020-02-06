@@ -54,7 +54,7 @@ impl Actor {
 
     /// Obtain the list of capabilities declared in this actor's embedded token
     pub fn capabilities(&self) -> Vec<String> {
-        match self.token.claims.caps {
+        match self.token.claims.metadata.as_ref().unwrap().caps {
             Some(ref caps) => caps.clone(),
             None => vec![],
         }

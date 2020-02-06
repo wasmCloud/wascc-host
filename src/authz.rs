@@ -97,6 +97,9 @@ pub(crate) fn pk_for_id(id: u64) -> String {
 pub(crate) fn can_invoke(pk: &str, capability_id: &str) -> bool {
     CLAIMS.read().unwrap().get(pk).map_or(false, |claims| {
         claims
+            .metadata
+            .as_ref()
+            .unwrap()
             .caps
             .as_ref()
             .map_or(false, |caps| caps.contains(&capability_id.to_string()))
@@ -121,7 +124,15 @@ pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token> {
 
             info!(
                 "Discovered capability attestations: {}",
-                token.claims.caps.clone().unwrap().join(",")
+                token
+                    .claims
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .caps
+                    .clone()
+                    .unwrap()
+                    .join(",")
             );
             Ok(token)
         }

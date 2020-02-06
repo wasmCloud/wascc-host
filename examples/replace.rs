@@ -39,7 +39,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     println!("**> Press ENTER to remove the key-value provider");
     io::stdin().read_line(&mut input)?;
-    host::remove_native_capability("wascc:keyvalue")?; 
+    host::remove_native_capability("wascc:keyvalue")?;
 
     println!("**> Press ENTER to add an in-memory key-value provider");
     io::stdin().read_line(&mut input)?;
@@ -48,7 +48,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )?)?;
 
     println!("**> Now your counter should have started over.");
-
 
     std::thread::park();
 
