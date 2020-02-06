@@ -1,0 +1,70 @@
+html,
+body {
+  font: 36px/1.21 "Helvetica Neue", arial, sans-serif;
+  font-weight: 400;
+  background: #fff;
+}
+
+div.main {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+}
+
+div.request {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  flex-direction: row;
+  height: 175px;
+  width: 650px;
+}
+
+div.payload {
+  font-family: monospace;
+  white-space: pre-wrap;
+}
+
+h1 {
+  text-align: center;
+}
+
+a {
+  position: relative;
+  display: inline-block;
+  padding: 1.2em 2em;
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  color: white;
+  margin-right: 25px;
+}
+
+a::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(135deg, #6e8efb, #a777e3);
+  border-radius: 4px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+a::after {
+  position: relative;
+  display: inline-block;
+  content: attr(data-title);
+  transition: transform 0.2s ease;
+  font-weight: bold;
+  letter-spacing: 0.01em;
+}
+
+@media only screen and (max-width: 790px) {
+  div.request {
+    flex-direction: column;
+  }
+}
