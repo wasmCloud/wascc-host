@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "kvui",
+  "name": "replace_ui",
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
