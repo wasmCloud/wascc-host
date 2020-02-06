@@ -6,6 +6,7 @@ events {
 
 http {    
     index   index.html index.htm;
+    include    mime.types;
 
     server {        
         root DIR/build;
