@@ -56,7 +56,7 @@ pub fn add_middleware(mid: impl Middleware) {
 /// will be determined by examining the capability attestation in this actor's embedded token.
 pub fn add_capability(actor: Actor, wasi: WasiParams) -> Result<()> {
     let wg = WaitGroup::new();
-    listen_for_invocations(
+    spawn_actor_and_listen(
         wg.clone(),
         actor.token.claims,
         actor.bytes.clone(),
@@ -109,7 +109,7 @@ pub fn remove_capability(cap_id: &str) -> Result<()> {
 pub fn add_actor(actor: Actor) -> Result<()> {
     let wg = WaitGroup::new();
     info!("Adding actor {} to host", actor.public_key());
-    listen_for_invocations(
+    spawn_actor_and_listen(
         wg.clone(),
         actor.token.claims,
         actor.bytes.clone(),
@@ -208,7 +208,7 @@ pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
         .unwrap()
         .add_plugin(capability)?;
     let wg = WaitGroup::new();
-    listen_for_native_invocations(wg.clone(), &capid)?;
+    spawn_capability_provider_and_listen(wg.clone(), &capid)?;
     wg.wait();
     Ok(())
 }
@@ -276,7 +276,7 @@ pub fn configure(module: &str, capid: &str, config: HashMap<String, String>) -> 
 /// perform invocations on an actor module via the channels inside the dispatcher. Invocations
 /// pulled off the channel are then invoked by looking up the target capability ID on the
 /// router and invoking via the channels from the router.
-fn listen_for_native_invocations(wg: WaitGroup, capid: &str) -> Result<()> {
+fn spawn_capability_provider_and_listen(wg: WaitGroup, capid: &str) -> Result<()> {
     let capid = capid.to_string();
 
     thread::spawn(move || {
@@ -322,7 +322,7 @@ fn listen_for_native_invocations(wg: WaitGroup, capid: &str) -> Result<()> {
                                     "Dispatch between actor and unauthorized capability: {} <-> {}",
                                     target, capid
                                 ))
-                            } else {
+                            } else {                                
                                 let pair = ROUTER.read().unwrap().get_pair(target);
                                 match pair {
                                     Some(ref p) => {
@@ -331,7 +331,7 @@ fn listen_for_native_invocations(wg: WaitGroup, capid: &str) -> Result<()> {
                                     None => InvocationResponse::error("Dispatch to unknown actor"),
                                 }
                             }
-                        };
+                        };                        
                         resp_s.send(inv_r).unwrap();
                     }
                 },
@@ -351,8 +351,8 @@ fn listen_for_native_invocations(wg: WaitGroup, capid: &str) -> Result<()> {
 }
 
 /// Spawns a new thread, inside which we create an instance of the wasm module interpreter. This function
-/// handles incoming calls targeted at either an actor module or a portable capability provider (both are wasm).
-fn listen_for_invocations(
+/// handles incoming calls _targeted at_ either an actor module or a portable capability provider (both are wasm).
+fn spawn_actor_and_listen(
     wg: WaitGroup,
     claims: Claims,
     buf: Vec<u8>,
@@ -482,7 +482,7 @@ fn host_callback(
     op: &str,
     payload: &[u8],
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    info!("Guest {} invoking {}", id, op);
+    trace!("Guest {} invoking {}", id, op);
     let v: Vec<_> = op.split('!').collect();
     let capability_id = v[0];
     if !authz::can_id_invoke(id, capability_id) {
@@ -491,23 +491,15 @@ fn host_callback(
                 "Actor {} does not have permission to use capability {}",
                 id, capability_id
             ),
-        ))));
+        ))));    
     }
-    let pair = ROUTER.read().unwrap().get_pair(capability_id);
-    match pair {
-        Some((inv_s, resp_r)) => {
-            inv_s.send(Invocation::new(authz::pk_for_id(id), op, payload.to_vec()))?;
-            match resp_r.recv() {
-                Ok(ir) => Ok(ir.msg),
-                Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
-                    e.into(),
-                )))),
-            }
-        }
-        None => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
-            "Attempt to make host call into non-existent target".into(),
-        )))),
-    }
+    let inv = Invocation::new(authz::pk_for_id(id), op, payload.to_vec());
+    match middleware::invoke_capability(inv) {
+        Ok(inv_r) => Ok(inv_r.msg),
+        Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
+            e.into()
+        )))),        
+    }    
 }
 
 /// Send a request on the invoker channel and await a reply on the response channel
