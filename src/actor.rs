@@ -22,7 +22,7 @@ use wascap::jwt::Token;
 /// An actor is a WebAssembly module that can consume capabilities exposed by capability providers
 #[derive(Debug)]
 pub struct Actor {
-    pub(crate) token: Token,
+    pub(crate) token: Token<wascap::jwt::Actor>,
     pub(crate) bytes: Vec<u8>,
 }
 

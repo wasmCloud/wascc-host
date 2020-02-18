@@ -21,14 +21,14 @@ use wascap::jwt::Token;
 use wascap::prelude::*;
 
 lazy_static! {
-    pub(crate) static ref CLAIMS: Arc<RwLock<HashMap<String, Claims>>> =
+    pub(crate) static ref CLAIMS: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>> =
         { Arc::new(RwLock::new(HashMap::new())) };
     pub(crate) static ref CLAIMS_MAP: Arc<RwLock<HashMap<u64, String>>> =
         { Arc::new(RwLock::new(HashMap::new())) };
     static ref AUTH_HOOK: RwLock<Option<Box<AuthHook>>> = RwLock::new(None);
 }
 
-type AuthHook = dyn Fn(&Token) -> bool + Sync + Send + 'static;
+type AuthHook = dyn Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static;
 
 /// Setting a custom authorization hook allows your code to make additional decisions
 /// on whether or not a given actor is allowed to run within the host. The authorization
@@ -36,12 +36,12 @@ type AuthHook = dyn Fn(&Token) -> bool + Sync + Send + 'static;
 #[allow(dead_code)]
 pub fn set_auth_hook<F>(hook: F)
 where
-    F: Fn(&Token) -> bool + Sync + Send + 'static,
+    F: Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static,
 {
     *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
 }
 
-pub(crate) fn get_all_claims() -> Vec<(String, Claims)> {
+pub(crate) fn get_all_claims() -> Vec<(String, Claims<wascap::jwt::Actor>)> {
     CLAIMS
         .read()
         .unwrap()
@@ -50,7 +50,7 @@ pub(crate) fn get_all_claims() -> Vec<(String, Claims)> {
         .collect()
 }
 
-pub(crate) fn check_auth(token: &Token) -> bool {
+pub(crate) fn check_auth(token: &Token<wascap::jwt::Actor>) -> bool {
     let lock = AUTH_HOOK.read().unwrap();
     match *lock {
         Some(ref f) => f(token),
@@ -58,7 +58,7 @@ pub(crate) fn check_auth(token: &Token) -> bool {
     }
 }
 
-pub(crate) fn store_claims(claims: Claims) -> Result<()> {
+pub(crate) fn store_claims(claims: Claims<wascap::jwt::Actor>) -> Result<()> {
     CLAIMS
         .write()
         .unwrap()
@@ -95,6 +95,9 @@ pub(crate) fn pk_for_id(id: u64) -> String {
 }
 
 pub(crate) fn can_invoke(pk: &str, capability_id: &str) -> bool {
+    if pk == capability_id {
+        return true;
+    }
     CLAIMS.read().unwrap().get(pk).map_or(false, |claims| {
         claims
             .metadata
@@ -106,12 +109,12 @@ pub(crate) fn can_invoke(pk: &str, capability_id: &str) -> bool {
     })
 }
 
-pub(crate) fn get_claims(pk: &str) -> Option<Claims> {
+pub(crate) fn get_claims(pk: &str) -> Option<Claims<wascap::jwt::Actor>> {
     CLAIMS.read().unwrap().get(pk).cloned()
 }
 
 /// Extract claims from the JWT embedded in the wasm module's custom section
-pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token> {
+pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token<wascap::jwt::Actor>> {
     let token = wascap::wasm::extract_claims(buf)?;
     match token {
         Some(token) => {
@@ -143,7 +146,7 @@ pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token> {
 }
 
 fn enforce_validation(jwt: &str) -> Result<()> {
-    let v = validate_token(jwt)?;
+    let v = validate_token::<wascap::jwt::Actor>(jwt)?;
     if v.expired {
         Err(errors::new(errors::ErrorKind::Authorization(
             "Expired token".to_string(),

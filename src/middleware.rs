@@ -31,7 +31,7 @@ pub trait Middleware: Send + Sync + 'static {
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
 }
 
-pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {        
+pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
     let inv = match run_capability_pre_invoke(inv.clone(), &MIDDLEWARES.read().unwrap()) {
         Ok(i) => i,
         Err(e) => {
@@ -51,7 +51,7 @@ pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
     }
 }
 
-pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<InvocationResponse> {    
+pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<InvocationResponse> {
     let inv = match run_actor_pre_invoke(inv.clone(), &MIDDLEWARES.read().unwrap()) {
         Ok(i) => i,
         Err(e) => {

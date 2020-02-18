@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -23,8 +23,8 @@ crossbeam-channel = "0.4.0"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
 wapc = "0.2.1"
-wascc-codec = "0.3.5"
-wascap = "0.2.0"
+wascc-codec = "0.4.0"
+wascap = "0.4.0"
 prost = "0.6.1"
 log = "0.4.8"
 env_logger = "0.7.1"

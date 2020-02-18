@@ -168,7 +168,7 @@ pub fn remove_actor(pk: &str) -> Result<()> {
 /// appear in the resulting vector is _not guaranteed_. **NOTE** - Because actors are added and
 /// removed asynchronously, this function returns a view of the actors only as seen at
 /// the moment the function is invoked.
-pub fn actors() -> Vec<(String, Claims)> {
+pub fn actors() -> Vec<(String, Claims<wascap::jwt::Actor>)> {
     authz::get_all_claims()
 }
 
@@ -182,7 +182,7 @@ pub fn capabilities() -> Vec<CapabilitySummary> {
 /// not running in the host. Actors are added and removed asynchronously, and actors are
 /// not visible until fully running, so if you attempt to query an actor's claims
 /// immediately after calling `add_actor`, this function might (correctly) return `None`
-pub fn actor_claims(pk: &str) -> Option<Claims> {
+pub fn actor_claims(pk: &str) -> Option<Claims<wascap::jwt::Actor>> {
     authz::get_claims(pk)
 }
 
@@ -322,7 +322,7 @@ fn spawn_capability_provider_and_listen(wg: WaitGroup, capid: &str) -> Result<()
                                     "Dispatch between actor and unauthorized capability: {} <-> {}",
                                     target, capid
                                 ))
-                            } else {                                
+                            } else {
                                 let pair = ROUTER.read().unwrap().get_pair(target);
                                 match pair {
                                     Some(ref p) => {
@@ -331,7 +331,7 @@ fn spawn_capability_provider_and_listen(wg: WaitGroup, capid: &str) -> Result<()
                                     None => InvocationResponse::error("Dispatch to unknown actor"),
                                 }
                             }
-                        };                        
+                        };
                         resp_s.send(inv_r).unwrap();
                     }
                 },
@@ -354,7 +354,7 @@ fn spawn_capability_provider_and_listen(wg: WaitGroup, capid: &str) -> Result<()
 /// handles incoming calls _targeted at_ either an actor module or a portable capability provider (both are wasm).
 fn spawn_actor_and_listen(
     wg: WaitGroup,
-    claims: Claims,
+    claims: Claims<wascap::jwt::Actor>,
     buf: Vec<u8>,
     wasi: Option<WasiParams>,
     actor: bool,
@@ -488,18 +488,36 @@ fn host_callback(
     if !authz::can_id_invoke(id, capability_id) {
         return Err(Box::new(errors::new(errors::ErrorKind::Authorization(
             format!(
-                "Actor {} does not have permission to use capability {}",
+                "Actor {} does not have permission to communicate with {}",
                 id, capability_id
             ),
-        ))));    
+        ))));
     }
-    let inv = Invocation::new(authz::pk_for_id(id), op, payload.to_vec());
-    match middleware::invoke_capability(inv) {
-        Ok(inv_r) => Ok(inv_r.msg),
-        Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
-            e.into()
-        )))),        
-    }    
+    if capability_id.len() == 56 && capability_id.starts_with("M") {
+        // This is an actor-to-actor call
+        if let Some(pair) = ROUTER.read().unwrap().get_pair(capability_id) {
+            match invoke(&pair, authz::pk_for_id(id), op, &payload.to_vec()) {
+                Ok(ir) => {
+                    if ir.error.is_some() {
+                        Err(ir.error.unwrap().into())
+                    } else {
+                        Ok(ir.msg)
+                    }
+                }
+                Err(e) => Err(Box::new(e)),
+            }
+        } else {
+            Err("Attempted actor-to-actor call to non-existent target".into())
+        }
+    } else {
+        let inv = Invocation::new(authz::pk_for_id(id), op, payload.to_vec());
+        match middleware::invoke_capability(inv) {
+            Ok(inv_r) => Ok(inv_r.msg),
+            Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
+                e.into(),
+            )))),
+        }
+    }
 }
 
 /// Send a request on the invoker channel and await a reply on the response channel

@@ -21,7 +21,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn verify_issuer(token: &Token) -> bool {
+fn verify_issuer(token: &Token<wascap::jwt::Actor>) -> bool {
     token.claims.issuer == "AAGRUXXTGSP4C27RWPTMCHCJF56JD53EQPA2R7RPC5VI4E274KPRMMJ5"
     //token.claims.issuer == "some unknown account here"
 }
