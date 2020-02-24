@@ -107,6 +107,7 @@ pub fn remove_capability(cap_id: &str) -> Result<()> {
 /// comes from the `subject` field on the embedded claims and is the primary key of the
 /// module identity.
 pub fn add_actor(actor: Actor) -> Result<()> {
+    ensure_extras()?;
     let wg = WaitGroup::new();
     info!("Adding actor {} to host", actor.public_key());
     spawn_actor_and_listen(
@@ -117,6 +118,16 @@ pub fn add_actor(actor: Actor) -> Result<()> {
         true,
     )?;
     wg.wait();
+    Ok(())
+}
+
+fn ensure_extras() -> Result<()> {
+    if ROUTER.read().unwrap().get_pair("wascc:extras").is_some() {
+        return Ok(());
+    }
+    add_native_capability(NativeCapability::from_instance(
+        crate::extras::ExtrasCapabilityProvider::default(),
+    )?)?;
     Ok(())
 }
 

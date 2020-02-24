@@ -34,7 +34,7 @@ pub struct NativeCapability {
     // This field is solely used to keep the FFI library instance allocated for the same
     // lifetime as the boxed plugin
     #[allow(dead_code)]
-    library: Library,
+    library: Option<Library>,
 }
 
 impl NativeCapability {
@@ -61,7 +61,18 @@ impl NativeCapability {
         Ok(NativeCapability {
             capid,
             plugin,
-            library,
+            library: Some(library),
+        })
+    }
+
+    /// If you know ahead of time that you want a particular capability provider to be a compile-time
+    /// dependency, you can create your own provider instance and pass it to this function
+    pub fn from_instance(instance: impl CapabilityProvider) -> Result<Self> {
+        let capid = instance.capability_id();
+        Ok(NativeCapability {
+            capid: capid.to_string(),
+            plugin: Box::new(instance),
+            library: None,
         })
     }
 

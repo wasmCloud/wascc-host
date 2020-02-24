@@ -92,6 +92,7 @@ mod authz;
 mod capability;
 mod dispatch;
 pub mod errors;
+mod extras;
 pub mod host;
 mod middleware;
 mod plugins;
