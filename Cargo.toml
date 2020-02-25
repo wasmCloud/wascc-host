@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -31,3 +31,9 @@ env_logger = "0.7.1"
 lazy_static = "1.4.0"
 rand = "0.7.3"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8.11"
+serde_json = "1.0"
+
+quicli = "0.4"
+structopt = "0.3.9"
