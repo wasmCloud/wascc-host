@@ -1,0 +1,16 @@
+# This file provides the same runtime host as the kvcounter.rs sample, but in manifest form
+---
+actors:
+    - ./examples/.assets/kvcounter.wasm
+capabilities:
+    - ./examples/.assets/libredis_provider.so
+    - ./examples/.assets/libwascc_httpsrv.so
+config:
+    - actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ"
+      capability: "wascc:keyvalue"
+      values:
+        URL: redis://127.0.0.1:6379
+    - actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ"
+      capability: "wascc:http_server"
+      values:
+        PORT: "8081"

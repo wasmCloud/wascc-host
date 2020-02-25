@@ -24,7 +24,7 @@ use crate::errors;
 use crate::middleware;
 use crate::middleware::Middleware;
 use crate::plugins::PLUGMAN;
-use crate::router::InvokerPair;
+use crate::{manifest::HostManifest, router::InvokerPair};
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
@@ -118,6 +118,25 @@ pub fn add_actor(actor: Actor) -> Result<()> {
         true,
     )?;
     wg.wait();
+    Ok(())
+}
+
+/// Applies a manifest containing actors, capabilities, and actor-capability configuration
+/// entries. This provides a useful shortcut for provisioning an entire host.
+pub fn apply_manifest(manifest: HostManifest) -> Result<()> {
+    for actor in manifest.actors {
+        // for now, only support file paths
+        // TODO: support public keys and fetch from gantry        
+        add_actor(Actor::from_file(actor)?)?;
+    }
+    for cap in manifest.capabilities {
+        // for now, supports only file paths        
+        add_native_capability(NativeCapability::from_file(cap)?)?;
+    }
+    for config in manifest.config {
+        configure(&config.actor, &config.capability,
+        config.values)?;
+    }
     Ok(())
 }
 
