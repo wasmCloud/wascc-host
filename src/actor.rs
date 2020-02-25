@@ -15,7 +15,6 @@
 use crate::authz;
 use crate::Result;
 use crossbeam_channel::unbounded;
-use gantryclient::*;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
