@@ -17,7 +17,7 @@ use crate::Result;
 use crossbeam_channel::unbounded;
 use std::fs::File;
 use std::io::prelude::*;
-use std::path::Path;
+use std::{sync::{Arc, RwLock}, path::Path};
 use wascap::jwt::Token;
 
 /// An actor is a WebAssembly module that can consume capabilities exposed by capability providers
@@ -46,19 +46,22 @@ impl Actor {
     /// Create an actor from the Gantry registry
     pub fn from_gantry(actor: &str) -> Result<Actor> {
         let (s, r) = unbounded();
+        let bytevec = Arc::new(RwLock::new(Vec::new()));
+        let b =  bytevec.clone();
         let _ack = crate::host::GANTRYCLIENT
             .read()
             .unwrap()
             .download_actor(actor, move |chunk| {
-                let mut bytevec: Vec<u8> = Vec::new();
-                bytevec.extend_from_slice(&chunk.chunk_bytes);
+                //let mut bytevec: Vec<u8> = Vec::new();
+                bytevec.write().unwrap().extend_from_slice(&chunk.chunk_bytes);
                 if chunk.sequence_no == chunk.total_chunks {
-                    s.send(bytevec).unwrap();
+                    s.send(true).unwrap();
                 }
                 Ok(())
             });
-        let downloaded_bytes = r.recv().unwrap();
-        Actor::from_bytes(downloaded_bytes)
+        let _ = r.recv().unwrap();
+        let vec = b.read().unwrap();
+        Actor::from_bytes(vec.clone())
     }
 
     /// Obtain the actor's public key. This is globally unique identifier
