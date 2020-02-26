@@ -14,6 +14,7 @@
 
 use crate::authz;
 use crate::Result;
+use crossbeam_channel::unbounded;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -40,6 +41,24 @@ impl Actor {
         file.read_to_end(&mut buf)?;
 
         Actor::from_bytes(buf)
+    }
+
+    /// Create an actor from the Gantry registry
+    pub fn from_gantry(actor: &str) -> Result<Actor> {
+        let (s, r) = unbounded();
+        let _ack = crate::host::GANTRYCLIENT
+            .read()
+            .unwrap()
+            .download_actor(actor, move |chunk| {
+                let mut bytevec: Vec<u8> = Vec::new();
+                bytevec.extend_from_slice(&chunk.chunk_bytes);
+                if chunk.sequence_no == chunk.total_chunks {
+                    s.send(bytevec).unwrap();
+                }
+                Ok(())
+            });
+        let downloaded_bytes = r.recv().unwrap();
+        Actor::from_bytes(downloaded_bytes)
     }
 
     /// Obtain the actor's public key. This is globally unique identifier

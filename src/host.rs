@@ -28,6 +28,7 @@ use crate::{manifest::HostManifest, router::InvokerPair};
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
+use gantryclient::*;
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -45,6 +46,8 @@ lazy_static! {
     pub(crate) static ref ROUTER: RwLock<Router> = { RwLock::new(Router::default()) };
     pub(crate) static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
         { RwLock::new(HashMap::new()) };
+    pub(crate) static ref GANTRYCLIENT: RwLock<gantryclient::Client> =
+        RwLock::new(Client::default());
 }
 
 /// Adds a middleware trait object to the middleware processing pipeline.
@@ -126,16 +129,15 @@ pub fn add_actor(actor: Actor) -> Result<()> {
 pub fn apply_manifest(manifest: HostManifest) -> Result<()> {
     for actor in manifest.actors {
         // for now, only support file paths
-        // TODO: support public keys and fetch from gantry        
+        // TODO: support public keys and fetch from gantry
         add_actor(Actor::from_file(actor)?)?;
     }
     for cap in manifest.capabilities {
-        // for now, supports only file paths        
+        // for now, supports only file paths
         add_native_capability(NativeCapability::from_file(cap)?)?;
     }
     for config in manifest.config {
-        configure(&config.actor, &config.capability,
-        config.values)?;
+        configure(&config.actor, &config.capability, config.values)?;
     }
     Ok(())
 }
@@ -300,6 +302,12 @@ pub fn configure(module: &str, capid: &str, config: HashMap<String, String>) -> 
             capid
         )))),
     }
+}
+
+/// Connect to a Gantry server
+pub fn configure_gantry(nats_urls: Vec<String>, jwt: &str, seed: &str) -> Result<()> {
+    *GANTRYCLIENT.write().unwrap() = Client::new(nats_urls, jwt, seed);
+    Ok(())
 }
 
 /// Creates a dispatcher and gives it to a native plugin, allowing that plugin to then
