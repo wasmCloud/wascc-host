@@ -17,7 +17,10 @@ use crate::Result;
 use crossbeam_channel::unbounded;
 use std::fs::File;
 use std::io::prelude::*;
-use std::{sync::{Arc, RwLock}, path::Path};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+};
 use wascap::jwt::Token;
 
 /// An actor is a WebAssembly module that can consume capabilities exposed by capability providers
@@ -47,13 +50,15 @@ impl Actor {
     pub fn from_gantry(actor: &str) -> Result<Actor> {
         let (s, r) = unbounded();
         let bytevec = Arc::new(RwLock::new(Vec::new()));
-        let b =  bytevec.clone();
+        let b = bytevec.clone();
         let _ack = crate::host::GANTRYCLIENT
             .read()
             .unwrap()
             .download_actor(actor, move |chunk| {
-                //let mut bytevec: Vec<u8> = Vec::new();
-                bytevec.write().unwrap().extend_from_slice(&chunk.chunk_bytes);
+                bytevec
+                    .write()
+                    .unwrap()
+                    .extend_from_slice(&chunk.chunk_bytes);
                 if chunk.sequence_no == chunk.total_chunks {
                     s.send(true).unwrap();
                 }
@@ -78,6 +83,14 @@ impl Actor {
     pub fn capabilities(&self) -> Vec<String> {
         match self.token.claims.metadata.as_ref().unwrap().caps {
             Some(ref caps) => caps.clone(),
+            None => vec![],
+        }
+    }
+
+    /// Obtain the list of tags in the actor's token
+    pub fn tags(&self) -> Vec<String> {
+        match self.token.claims.metadata.as_ref().unwrap().tags {
+            Some(ref tags) => tags.clone(),
             None => vec![],
         }
     }
