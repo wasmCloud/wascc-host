@@ -74,6 +74,14 @@ impl Actor {
         self.token.claims.subject.to_string()
     }
 
+    /// The actor's human-friendly display name
+    pub fn name(&self) -> String {
+        match self.token.claims.metadata.as_ref().unwrap().name {
+            Some(ref n) => n.to_string(),
+            None => "Unnamed".to_string(),
+        }
+    }
+
     /// Obtain the public key of the issuer of the actor's signed token
     pub fn issuer(&self) -> String {
         self.token.claims.issuer.to_string()
