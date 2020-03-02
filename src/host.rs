@@ -517,12 +517,15 @@ fn deconfigure_actor(key: &str) {
 /// namespace-delimited string like `wapc:messaging` or `wapc:keyvalue`.
 fn host_callback(
     id: u64,
+    ns: &str,
     op: &str,
     payload: &[u8],
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    trace!("Guest {} invoking {}", id, op);
-    let v: Vec<_> = op.split('!').collect();
-    let capability_id = v[0];
+    trace!("Guest {} invoking {}:{}", id, ns, op);
+    
+    let capability_id = ns;
+    let op = format!("{}!{}", capability_id, op);
+
     if !authz::can_id_invoke(id, capability_id) {
         return Err(Box::new(errors::new(errors::ErrorKind::Authorization(
             format!(
@@ -534,7 +537,7 @@ fn host_callback(
     if capability_id.len() == 56 && capability_id.starts_with("M") {
         // This is an actor-to-actor call
         if let Some(pair) = ROUTER.read().unwrap().get_pair(capability_id) {
-            match invoke(&pair, authz::pk_for_id(id), op, &payload.to_vec()) {
+            match invoke(&pair, authz::pk_for_id(id), &op, &payload.to_vec()) {
                 Ok(ir) => {
                     if ir.error.is_some() {
                         Err(ir.error.unwrap().into())
@@ -548,7 +551,7 @@ fn host_callback(
             Err("Attempted actor-to-actor call to non-existent target".into())
         }
     } else {
-        let inv = Invocation::new(authz::pk_for_id(id), op, payload.to_vec());
+        let inv = Invocation::new(authz::pk_for_id(id), &op, payload.to_vec());
         match middleware::invoke_capability(inv) {
             Ok(inv_r) => Ok(inv_r.msg),
             Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
