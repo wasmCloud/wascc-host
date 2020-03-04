@@ -29,7 +29,6 @@ use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
 use gantryclient::*;
-use prost::Message;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::thread;
@@ -38,6 +37,7 @@ use wascap::jwt::Claims;
 use wascc_codec::core::{
     CapabilityConfiguration, OP_CONFIGURE, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR,
 };
+use wascc_codec::serialize;
 
 pub use authz::set_auth_hook;
 
@@ -286,7 +286,7 @@ pub fn configure(module: &str, capid: &str, config: HashMap<String, String>) -> 
                 &pair,
                 "system".to_string(),
                 &format!("{}!{}", capid, OP_CONFIGURE),
-                &gen_config_proto(&module, config),
+                &gen_config_message(&module, config),
             )?;
             if let Some(e) = res.error {
                 Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
@@ -493,8 +493,7 @@ fn deconfigure_actor(key: &str) {
         module: key.to_string(),
         values: HashMap::new(),
     };
-    let mut buf = Vec::new();
-    cfg.encode(&mut buf).unwrap();
+    let buf = serialize(&cfg).unwrap();
     ROUTER
         .read()
         .unwrap()
@@ -522,7 +521,7 @@ fn host_callback(
     payload: &[u8],
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
     trace!("Guest {} invoking {}:{}", id, ns, op);
-    
+
     let capability_id = ns;
     let op = format!("{}!{}", capability_id, op);
 
@@ -579,14 +578,12 @@ fn invoke(
 
 /// Converts a hashmap into the CapabilityConfiguration protobuf object to
 /// be sent to a capability provider to supply configuration for an actor
-fn gen_config_proto(module: &str, values: HashMap<String, String>) -> Vec<u8> {
-    let mut buf = Vec::new();
+fn gen_config_message(module: &str, values: HashMap<String, String>) -> Vec<u8> {
     let cfgvals = CapabilityConfiguration {
         module: module.to_string(),
         values,
     };
-    cfgvals.encode(&mut buf).unwrap();
-    buf
+    serialize(&cfgvals).unwrap()
 }
 
 /// An immutable representation of an invocation within waSCC

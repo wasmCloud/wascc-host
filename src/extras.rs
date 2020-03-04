@@ -1,4 +1,3 @@
-use prost::Message;
 use std::error::Error;
 use std::sync::{Arc, RwLock};
 use std::{
@@ -8,6 +7,7 @@ use std::{
 use uuid::Uuid;
 use wascc_codec::capabilities::{CapabilityProvider, Dispatcher, NullDispatcher};
 use wascc_codec::extras::*;
+use wascc_codec::{deserialize, serialize};
 
 pub(crate) struct ExtrasCapabilityProvider {
     dispatcher: Arc<RwLock<Box<dyn Dispatcher>>>,
@@ -29,38 +29,44 @@ impl ExtrasCapabilityProvider {
     fn generate_guid(
         &self,
         _actor: &str,
-        _msg: impl Into<GeneratorRequest>,
+        _msg: GeneratorRequest,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
         let uuid = Uuid::new_v4();
         let result = GeneratorResult {
-            value: Some(generator_result::Value::Guid(format!("{}", uuid))),
+            value: GeneratorResultType::Guid(format!("{}", uuid)),
         };
-        let mut buf = Vec::new();
-        result.encode(&mut buf)?;
-        Ok(buf)
+
+        Ok(serialize(&result)?)
     }
 
     fn generate_random(
         &self,
         _actor: &str,
-        msg: impl Into<GeneratorRequest>,
+        msg: GeneratorRequest,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
         use rand::prelude::*;
-        let req = msg.into();
         let mut rng = rand::thread_rng();
-        let n: u32 = rng.gen_range(req.min, req.max);
-        let result = GeneratorResult {
-            value: Some(generator_result::Value::RandomNo(n)),
+        let result = if let GeneratorRequest {
+            typ: GeneratorRequestType::RandomNumber(min, max),
+        } = msg
+        {
+            let n: u32 = rng.gen_range(min, max);
+            GeneratorResult {
+                value: GeneratorResultType::RandomNumber(n),
+            }
+        } else {
+            GeneratorResult {
+                value: GeneratorResultType::RandomNumber(0),
+            }
         };
-        let mut buf = Vec::new();
-        result.encode(&mut buf)?;
-        Ok(buf)
+
+        Ok(serialize(result)?)
     }
 
     fn generate_sequence(
         &self,
         actor: &str,
-        _msg: impl Into<GeneratorRequest>,
+        _msg: GeneratorRequest,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut lock = self.sequences.write().unwrap();
         let seq = lock
@@ -68,11 +74,9 @@ impl ExtrasCapabilityProvider {
             .or_insert(AtomicU64::new(0))
             .fetch_add(1, Ordering::SeqCst);
         let result = GeneratorResult {
-            value: Some(generator_result::Value::SequenceNo(seq)),
+            value: GeneratorResultType::SequenceNumber(seq),
         };
-        let mut buf = Vec::new();
-        result.encode(&mut buf)?;
-        Ok(buf)
+        Ok(serialize(&result)?)
     }
 }
 
@@ -105,9 +109,9 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
         trace!("Received host call from {}, operation - {}", actor, op);
 
         match op {
-            OP_REQUEST_GUID => self.generate_guid(actor, msg.to_vec().as_ref()),
-            OP_REQUEST_RANDOM => self.generate_random(actor, msg.to_vec().as_ref()),
-            OP_REQUEST_SEQUENCE => self.generate_sequence(actor, msg.to_vec().as_ref()),
+            OP_REQUEST_GUID => self.generate_guid(actor, deserialize(msg)?),
+            OP_REQUEST_RANDOM => self.generate_random(actor, deserialize(msg)?),
+            OP_REQUEST_SEQUENCE => self.generate_sequence(actor, deserialize(msg)?),
             _ => Err("bad dispatch".into()),
         }
     }

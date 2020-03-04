@@ -28,8 +28,6 @@ pub fn new(kind: ErrorKind) -> Error {
 pub enum ErrorKind {
     Wapc(wapc::errors::Error),
     HostCallFailure(Box<dyn StdError>),
-    Encoding(prost::EncodeError),
-    Decoding(prost::DecodeError),
     Wascap(wascap::Error),
     Authorization(String),
     IO(std::io::Error),
@@ -53,8 +51,6 @@ impl StdError for Error {
             ErrorKind::Wapc(_) => "waPC error",
             ErrorKind::IO(_) => "I/O error",
             ErrorKind::HostCallFailure(_) => "Error occurred during host call",
-            ErrorKind::Encoding(_) => "Encoding failure",
-            ErrorKind::Decoding(_) => "Decoding failure",
             ErrorKind::Wascap(_) => "Embedded JWT Failure",
             ErrorKind::Authorization(_) => "Module authorization failure",
             ErrorKind::CapabilityProvider(_) => "Capability provider failure",
@@ -66,8 +62,6 @@ impl StdError for Error {
         match *self.0 {
             ErrorKind::Wapc(ref err) => Some(err),
             ErrorKind::HostCallFailure(_) => None,
-            ErrorKind::Encoding(ref err) => Some(err),
-            ErrorKind::Decoding(ref err) => Some(err),
             ErrorKind::Wascap(ref err) => Some(err),
             ErrorKind::Authorization(_) => None,
             ErrorKind::IO(ref err) => Some(err),
@@ -84,8 +78,6 @@ impl fmt::Display for Error {
             ErrorKind::HostCallFailure(ref err) => {
                 write!(f, "Error occurred during host call: {}", err)
             }
-            ErrorKind::Encoding(ref err) => write!(f, "Encoding failure: {}", err),
-            ErrorKind::Decoding(ref err) => write!(f, "Decoding failure: {}", err),
             ErrorKind::Wascap(ref err) => write!(f, "Embedded JWT failure: {}", err),
             ErrorKind::Authorization(ref err) => {
                 write!(f, "WebAssembly module authorization failure: {}", err)
@@ -111,20 +103,14 @@ impl From<wapc::errors::Error> for Error {
     }
 }
 
-impl From<prost::EncodeError> for Error {
-    fn from(source: prost::EncodeError) -> Error {
-        Error(Box::new(ErrorKind::Encoding(source)))
-    }
-}
-
-impl From<prost::DecodeError> for Error {
-    fn from(source: prost::DecodeError) -> Error {
-        Error(Box::new(ErrorKind::Decoding(source)))
-    }
-}
-
 impl From<std::io::Error> for Error {
     fn from(source: std::io::Error) -> Error {
         Error(Box::new(ErrorKind::IO(source)))
+    }
+}
+
+impl From<Box<dyn StdError>> for Error {
+    fn from(source: Box<dyn StdError>) -> Error {
+        Error(Box::new(ErrorKind::HostCallFailure(source)))
     }
 }
