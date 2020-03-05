@@ -58,14 +58,20 @@ impl PluginManager {
         let v: Vec<&str> = inv.operation.split('!').collect();
         let capability_id = v[0];
         match self.plugins.get(capability_id) {
+            // native capability is registered via plugin
             Some(c) => match c.plugin.handle_call(&inv.origin, &v[1], &inv.msg) {
                 Ok(msg) => Ok(InvocationResponse::success(msg)),
                 Err(e) => Err(errors::new(errors::ErrorKind::HostCallFailure(e))),
             },
-            None => Err(errors::new(ErrorKind::CapabilityProvider(format!(
-                "No such capability ID registered: {}",
-                capability_id
-            )))),
+            // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
+            None => if let Some(pair) = crate::host::ROUTER.read().unwrap().get_pair(&capability_id) {
+                crate::host::invoke(&pair, inv.origin.clone(), &inv.operation, &inv.msg)
+            } else {
+                Err(errors::new(ErrorKind::CapabilityProvider(format!(
+                    "No such capability ID registered: {}",
+                    capability_id
+                ))))
+            }
         }
     }
 

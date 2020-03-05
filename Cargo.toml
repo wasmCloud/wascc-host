@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -22,13 +22,14 @@ libloading = "0.5.2"
 crossbeam-channel = "0.4.2"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
-wapc = "0.3.0"
+#wapc = "0.4.0"
+wapc = { path = "../../waPC/wapc-rust" }
 wascc-codec = "0.5.0"
 wascap = "0.4.2"
 log = "0.4.8"
 env_logger = "0.7.1"
 lazy_static = "1.4.0"
-gantryclient = "0.0.2"
+gantryclient = "0.0.3"
 rand = "0.7.3"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 serde = { version = "1.0", features = ["derive"] }

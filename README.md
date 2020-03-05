@@ -24,3 +24,7 @@ Where the example name is the name (without the `.rs`) of any of the examples in
 **WARNING** - This API is experimental and subject to breaking changes.
 
 **NOTE** - All of these examples use _native_ capability providers, and therefore utilize the linux dynamic libraries (`.so` files). To use these examples on a Mac, you will need to manully build Mac dynamic libraries (`.dylib` files) and modify the examples to read those files instead.
+
+## waSCC on Kubernetes
+
+Looking to deploy waSCC actors on Kubernetes? Check out the [krustlet](https://github.com/deislabs/krustlet) project.

@@ -561,7 +561,7 @@ fn host_callback(
 }
 
 /// Send a request on the invoker channel and await a reply on the response channel
-fn invoke(
+pub(crate) fn invoke(
     pair: &InvokerPair,
     origin: String,
     op: &str,

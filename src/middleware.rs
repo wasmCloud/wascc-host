@@ -39,6 +39,7 @@ pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
             inv
         }
     };
+    
     let lock = crate::plugins::PLUGMAN.read().unwrap();
 
     let r = lock.call(&inv).unwrap();
