@@ -64,13 +64,15 @@ impl PluginManager {
                 Err(e) => Err(errors::new(errors::ErrorKind::HostCallFailure(e))),
             },
             // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
-            None => if let Some(pair) = crate::host::ROUTER.read().unwrap().get_pair(&capability_id) {
-                crate::host::invoke(&pair, inv.origin.clone(), &inv.operation, &inv.msg)
-            } else {
-                Err(errors::new(ErrorKind::CapabilityProvider(format!(
-                    "No such capability ID registered: {}",
-                    capability_id
-                ))))
+            None => {
+                if let Some(pair) = crate::host::ROUTER.read().unwrap().get_pair(&capability_id) {
+                    crate::host::invoke(&pair, inv.origin.clone(), &inv.operation, &inv.msg)
+                } else {
+                    Err(errors::new(ErrorKind::CapabilityProvider(format!(
+                        "No such capability ID registered: {}",
+                        capability_id
+                    ))))
+                }
             }
         }
     }

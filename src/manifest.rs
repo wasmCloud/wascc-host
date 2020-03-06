@@ -1,20 +1,24 @@
 use std::collections::HashMap;
-use std::{fs::File, io::Read, path::Path};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "manifest", derive(serde::Serialize, serde::Deserialize))]
 pub struct HostManifest {
     pub actors: Vec<String>,
     pub capabilities: Vec<String>,
     pub config: Vec<ConfigEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "manifest", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConfigEntry {
     pub actor: String,
     pub capability: String,
     pub values: HashMap<String, String>,
 }
 
+#[cfg(feature = "manifest")]
+use std::{fs::File, io::Read, path::Path};
+#[cfg(feature = "manifest")]
 impl HostManifest {
     pub fn from_yaml(
         path: impl AsRef<Path>,
@@ -41,10 +45,12 @@ impl HostManifest {
     }
 }
 
+#[cfg(feature = "manifest")]
 #[cfg(test)]
 mod test {
-    use crate::manifest::ConfigEntry;
+    use super::ConfigEntry;
     use std::collections::HashMap;
+
     #[test]
     fn round_trip() {
         let manifest = super::HostManifest {
