@@ -28,7 +28,6 @@ use crate::{manifest::HostManifest, router::InvokerPair};
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
-use gantryclient::*;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::thread;
@@ -46,8 +45,11 @@ lazy_static! {
     pub(crate) static ref ROUTER: RwLock<Router> = { RwLock::new(Router::default()) };
     pub(crate) static ref TERMINATORS: RwLock<HashMap<String, Sender<bool>>> =
         { RwLock::new(HashMap::new()) };
+}
+#[cfg(feature = "gantry")]
+lazy_static! {
     pub(crate) static ref GANTRYCLIENT: RwLock<gantryclient::Client> =
-        RwLock::new(Client::default());
+        RwLock::new(gantryclient::Client::default());
 }
 
 /// Adds a middleware trait object to the middleware processing pipeline.
@@ -305,8 +307,9 @@ pub fn configure(module: &str, capid: &str, config: HashMap<String, String>) -> 
 }
 
 /// Connect to a Gantry server
+#[cfg(feature = "gantry")]
 pub fn configure_gantry(nats_urls: Vec<String>, jwt: &str, seed: &str) -> Result<()> {
-    *GANTRYCLIENT.write().unwrap() = Client::new(nats_urls, jwt, seed);
+    *GANTRYCLIENT.write().unwrap() = gantryclient::Client::new(nats_urls, jwt, seed);
     Ok(())
 }
 

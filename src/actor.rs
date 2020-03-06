@@ -14,13 +14,9 @@
 
 use crate::authz;
 use crate::Result;
-use crossbeam_channel::unbounded;
 use std::fs::File;
 use std::io::prelude::*;
-use std::{
-    path::Path,
-    sync::{Arc, RwLock},
-};
+use std::path::Path;
 use wascap::jwt::Token;
 
 /// An actor is a WebAssembly module that can consume capabilities exposed by capability providers
@@ -47,7 +43,10 @@ impl Actor {
     }
 
     /// Create an actor from the Gantry registry
+    #[cfg(feature = "gantry")]
     pub fn from_gantry(actor: &str) -> Result<Actor> {
+        use crossbeam_channel::unbounded;
+        use std::sync::{Arc, RwLock};
         let (s, r) = unbounded();
         let bytevec = Arc::new(RwLock::new(Vec::new()));
         let b = bytevec.clone();

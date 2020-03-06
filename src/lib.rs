@@ -81,9 +81,6 @@ extern crate log;
 #[macro_use]
 extern crate crossbeam;
 
-#[macro_use]
-extern crate serde;
-
 pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
 pub use capability::NativeCapability;
