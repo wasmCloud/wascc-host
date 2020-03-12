@@ -22,24 +22,15 @@ use std::{fs::File, io::Read, path::Path};
 impl HostManifest {
     pub fn from_yaml(
         path: impl AsRef<Path>,
-    ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
-        let mut buf = Vec::new();
-        let mut file = File::open(path)?;
-        file.read_to_end(&mut buf)?;
-        match serde_yaml::from_slice::<HostManifest>(&buf) {
-            Ok(m) => Ok(m),
-            Err(e) => Err(format!("Failed to deserialize yaml: {} ", e).into()),
-        }
-    }
-
-    pub fn from_yaml_with_env_expansion(
-        path: impl AsRef<Path>,
+        expand_env: bool,
     ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
         let mut contents = String::new();
         let mut file = File::open(path)?;
         file.read_to_string(&mut contents)?;
+        if expand_env {
+            contents = Self::expand_env(&contents);
+        }
 
-        let contents = expand_env(&contents);
         match serde_yaml::from_str::<HostManifest>(&contents) {
             Ok(m) => Ok(m),
             Err(e) => Err(format!("Failed to deserialize yaml: {} ", e).into()),
@@ -48,46 +39,34 @@ impl HostManifest {
 
     pub fn from_json(
         path: impl AsRef<Path>,
-    ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
-        let mut buf = Vec::new();
-        let mut file = File::open(path)?;
-        file.read_to_end(&mut buf)?;
-        match serde_json::from_slice::<HostManifest>(&buf) {
-            Ok(m) => Ok(m),
-            Err(_) => Err("Failed to deserialize json".into()),
-        }
-    }
-
-    pub fn from_json_with_env_expansion(
-        path: impl AsRef<Path>,
+        expand_env: bool,
     ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
         let mut contents = String::new();
         let mut file = File::open(path)?;
         file.read_to_string(&mut contents)?;
+        if expand_env {
+            contents = Self::expand_env(&contents);
+        }
 
-        let contents = expand_env(&contents);
         match serde_json::from_str::<HostManifest>(&contents) {
             Ok(m) => Ok(m),
             Err(_) => Err("Failed to deserialize json".into()),
         }
     }
-}
 
-#[cfg(feature = "manifest")]
-use envmnt;
-#[cfg(feature = "manifest")]
-fn expand_env(contents: &str) -> String {
-    let mut options = envmnt::ExpandOptions::new();
-    options.default_to_empty = false; // If environment variable not found, leave unexpanded.
-    options.expansion_type = Some(envmnt::ExpansionType::UnixBrackets); // ${VAR}
+    fn expand_env(contents: &str) -> String {
+        let mut options = envmnt::ExpandOptions::new();
+        options.default_to_empty = false; // If environment variable not found, leave unexpanded.
+        options.expansion_type = Some(envmnt::ExpansionType::UnixBrackets); // ${VAR}
 
-    envmnt::expand(contents, Some(options))
+        envmnt::expand(contents, Some(options))
+    }
 }
 
 #[cfg(feature = "manifest")]
 #[cfg(test)]
 mod test {
-    use super::{ConfigEntry, expand_env};
+    use super::ConfigEntry;
     use std::collections::HashMap;
 
     #[test]
@@ -111,7 +90,7 @@ mod test {
         let expected = vec!["echo Test", "echo $TEST_EXPAND_ENV_TEMP", "echo /tmp", "echo ${TEST_EXPAND_ENV_TMP}"];
 
         envmnt::set("TEST_EXPAND_ENV_TEMP", "/tmp");
-        for (got, expected) in values.iter().map(|v| expand_env(v)).zip(expected.iter()) {
+        for (got, expected) in values.iter().map(|v| super::HostManifest::expand_env(v)).zip(expected.iter()) {
             assert_eq!(*expected, got);
         }
         envmnt::remove("TEST_EXPAND_ENV_TEMP");
