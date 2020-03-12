@@ -22,11 +22,16 @@ use std::{fs::File, io::Read, path::Path};
 impl HostManifest {
     pub fn from_yaml(
         path: impl AsRef<Path>,
+        expand_env: bool,
     ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
-        let mut buf = Vec::new();
+        let mut contents = String::new();
         let mut file = File::open(path)?;
-        file.read_to_end(&mut buf)?;
-        match serde_yaml::from_slice::<HostManifest>(&buf) {
+        file.read_to_string(&mut contents)?;
+        if expand_env {
+            contents = Self::expand_env(&contents);
+        }
+
+        match serde_yaml::from_str::<HostManifest>(&contents) {
             Ok(m) => Ok(m),
             Err(e) => Err(format!("Failed to deserialize yaml: {} ", e).into()),
         }
@@ -34,14 +39,27 @@ impl HostManifest {
 
     pub fn from_json(
         path: impl AsRef<Path>,
+        expand_env: bool,
     ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
-        let mut buf = Vec::new();
+        let mut contents = String::new();
         let mut file = File::open(path)?;
-        file.read_to_end(&mut buf)?;
-        match serde_json::from_slice::<HostManifest>(&buf) {
+        file.read_to_string(&mut contents)?;
+        if expand_env {
+            contents = Self::expand_env(&contents);
+        }
+
+        match serde_json::from_str::<HostManifest>(&contents) {
             Ok(m) => Ok(m),
             Err(_) => Err("Failed to deserialize json".into()),
         }
+    }
+
+    fn expand_env(contents: &str) -> String {
+        let mut options = envmnt::ExpandOptions::new();
+        options.default_to_empty = false; // If environment variable not found, leave unexpanded.
+        options.expansion_type = Some(envmnt::ExpansionType::UnixBrackets); // ${VAR}
+
+        envmnt::expand(contents, Some(options))
     }
 }
 
@@ -64,6 +82,18 @@ mod test {
         };
         let yaml = serde_yaml::to_string(&manifest).unwrap();
         assert_eq!(yaml, "---\nactors:\n  - a\n  - b\n  - c\ncapabilities:\n  - \"wascc:one\"\n  - \"wascc:two\"\nconfig:\n  - actor: a\n    capability: \"wascc:one\"\n    values:\n      ROOT: /tmp");
+    }
+
+    #[test]
+    fn env_expansion() {
+        let values = vec!["echo Test", "echo $TEST_EXPAND_ENV_TEMP", "echo ${TEST_EXPAND_ENV_TEMP}", "echo ${TEST_EXPAND_ENV_TMP}"];
+        let expected = vec!["echo Test", "echo $TEST_EXPAND_ENV_TEMP", "echo /tmp", "echo ${TEST_EXPAND_ENV_TMP}"];
+
+        envmnt::set("TEST_EXPAND_ENV_TEMP", "/tmp");
+        for (got, expected) in values.iter().map(|v| super::HostManifest::expand_env(v)).zip(expected.iter()) {
+            assert_eq!(*expected, got);
+        }
+        envmnt::remove("TEST_EXPAND_ENV_TEMP");
     }
 
     fn gen_values() -> HashMap<String, String> {
