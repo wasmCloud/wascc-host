@@ -24,7 +24,11 @@ use crate::errors;
 use crate::middleware;
 use crate::middleware::Middleware;
 use crate::plugins::PLUGMAN;
-use crate::{manifest::HostManifest, router::InvokerPair};
+
+#[cfg(feature="manifest")]
+use crate::manifest::HostManifest;
+
+use crate::router::InvokerPair;
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
@@ -128,11 +132,15 @@ pub fn add_actor(actor: Actor) -> Result<()> {
 
 /// Applies a manifest containing actors, capabilities, and actor-capability configuration
 /// entries. This provides a useful shortcut for provisioning an entire host.
+#[cfg(feature = "manifest")]
 pub fn apply_manifest(manifest: HostManifest) -> Result<()> {
     for actor in manifest.actors {
-        // for now, only support file paths
-        // TODO: support public keys and fetch from gantry
-        add_actor(Actor::from_file(actor)?)?;
+        
+        if cfg!(feature = "gantry") && actor.len() == 56 && actor.starts_with('M') { // This is an actor's public subject
+            add_actor(Actor::from_gantry(&actor)?)?;
+        } else {
+            add_actor(Actor::from_file(actor)?)?;
+        }                
     }
     for cap in manifest.capabilities {
         // for now, supports only file paths

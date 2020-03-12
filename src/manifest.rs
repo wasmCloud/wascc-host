@@ -103,18 +103,3 @@ mod test {
         hm
     }
 }
-
-/*
----
-actors:
-- bob
-- al
-- steve
-capabilities:
-- file://foo
-config:
-- actor: bob
-  capability: wascc:messaging
-  values:
-    a: b
-    */
