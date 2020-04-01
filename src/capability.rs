@@ -42,7 +42,7 @@ pub struct NativeCapability {
 impl NativeCapability {
     /// Reads a capability provider from a file. The capability provider must implement the
     /// correct FFI interface to support waSCC plugins
-    pub fn from_file<P: AsRef<OsStr>>(filename: P, binding_name: Option<String>) -> Result<Self> {
+    pub fn from_file<P: AsRef<OsStr>>(filename: P, binding_name: Option<&str>) -> Result<Self> {
         type PluginCreate = unsafe fn() -> *mut dyn CapabilityProvider;
 
         let library = Library::new(filename.as_ref())?;
@@ -63,7 +63,7 @@ impl NativeCapability {
         Ok(NativeCapability {
             capid,
             plugin,
-            binding_name: binding_name.unwrap_or("default".to_string()),
+            binding_name: binding_name.unwrap_or("default").to_string(),
             library: Some(library),
         })
     }
@@ -72,13 +72,13 @@ impl NativeCapability {
     /// dependency, you can create your own provider instance and pass it to this function
     pub fn from_instance(
         instance: impl CapabilityProvider,
-        binding_name: Option<String>,
+        binding_name: Option<&str>,
     ) -> Result<Self> {
         let capid = instance.capability_id();
         Ok(NativeCapability {
             capid: capid.to_string(),
             plugin: Box::new(instance),
-            binding_name: binding_name.unwrap_or("default".to_string()),
+            binding_name: binding_name.unwrap_or("default").to_string(),
             library: None,
         })
     }
