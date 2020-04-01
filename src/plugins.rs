@@ -1,4 +1,4 @@
-// Copyright 2015-2019 Capital One Services, LLC
+// Copyright 2015-2020 Capital One Services, LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,12 @@
 use crate::capability::NativeCapability;
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors::{self, ErrorKind};
-use crate::host::Invocation;
-use crate::host::InvocationResponse;
-use crate::Result;
+use crate::inthost::Invocation;
+use crate::inthost::{InvocationResponse, InvocationTarget};
+use crate::{
+    router::{get_route, route_key, RouteKey},
+    Result,
+};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -27,8 +30,7 @@ lazy_static! {
 
 #[derive(Default)]
 pub(crate) struct PluginManager {
-    plugins: HashMap<String, NativeCapability>, //plugins: HashMap<String, Box<dyn CapabilityProvider>>,
-                                                //loaded_libraries: HashMap<String, Library>
+    plugins: HashMap<RouteKey, NativeCapability>,
 }
 
 impl PluginManager {
@@ -38,10 +40,12 @@ impl PluginManager {
 
     pub fn register_dispatcher(
         &mut self,
+        binding: &str,
         capid: &str,
         dispatcher: WasccNativeDispatcher,
     ) -> Result<()> {
-        match self.plugins.get(capid) {
+        let key = route_key(Some(binding), capid);
+        match self.plugins.get(&key) {
             Some(p) => match p.plugin.configure_dispatch(Box::new(dispatcher)) {
                 Ok(_) => Ok(()),
                 Err(_) => Err(errors::new(ErrorKind::CapabilityProvider(
@@ -55,44 +59,55 @@ impl PluginManager {
     }
 
     pub fn call(&self, inv: &Invocation) -> Result<InvocationResponse> {
-        let v: Vec<&str> = inv.operation.split('!').collect();
-        let capability_id = v[0];
-        match self.plugins.get(capability_id) {
-            // native capability is registered via plugin
-            Some(c) => match c.plugin.handle_call(&inv.origin, &v[1], &inv.msg) {
-                Ok(msg) => Ok(InvocationResponse::success(msg)),
-                Err(e) => Err(errors::new(errors::ErrorKind::HostCallFailure(e))),
-            },
-            // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
-            None => {
-                if let Some(pair) = crate::host::ROUTER.read().unwrap().get_pair(&capability_id) {
-                    crate::host::invoke(&pair, inv.origin.clone(), &inv.operation, &inv.msg)
-                } else {
-                    Err(errors::new(ErrorKind::CapabilityProvider(format!(
-                        "No such capability ID registered: {}",
-                        capability_id
-                    ))))
+        if let InvocationTarget::Capability { capid, binding } = &inv.target {
+            let route_key = route_key(Some(&binding), &capid);
+            match self.plugins.get(&route_key) {
+                // native capability is registered via plugin
+                Some(c) => match c.plugin.handle_call(&inv.origin, &inv.operation, &inv.msg) {
+                    Ok(msg) => Ok(InvocationResponse::success(msg)),
+                    Err(e) => Err(errors::new(errors::ErrorKind::HostCallFailure(e))),
+                },
+                // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
+                None => {
+                    if let Some(entry) = get_route(Some(&binding), &capid) {
+                        entry.invoke(inv.clone())
+                    } else {
+                        Err(errors::new(ErrorKind::CapabilityProvider(format!(
+                            "No such capability ID registered as native plug-in or portable provider: {}",
+                            capid
+                        ))))
+                    }
                 }
             }
+        } else {
+            Err(errors::new(ErrorKind::MiscHost(
+                "Attempted to invoke a capability provider plugin as though it were an actor. Bad route?".into()
+            )))
         }
     }
 
     pub fn add_plugin(&mut self, plugin: NativeCapability) -> Result<()> {
-        if self.plugins.contains_key(&plugin.capid) {
+        let key = route_key(Some(&plugin.binding_name), &plugin.capid);
+        if self.plugins.contains_key(&key) {
             Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
-                "Duplicate capability ID attempted to register provider: {}",
-                plugin.capid
+                "Duplicate capability ID attempted to register provider: ({},{})",
+                plugin.binding_name, plugin.capid
             ))))
         } else {
-            self.plugins.insert(plugin.capid.to_string(), plugin);
+            self.plugins.insert(key, plugin);
             Ok(())
         }
     }
 
-    pub fn remove_plugin(&mut self, capid: &str) -> Result<()> {
-        if let Some(plugin) = self.plugins.remove(capid) {
+    pub fn remove_plugin(&mut self, binding: &str, capid: &str) -> Result<()> {
+        let key = route_key(Some(&binding), &capid);
+        if let Some(plugin) = self.plugins.remove(&key) {
             drop(plugin);
         }
         Ok(())
     }
+}
+
+pub(crate) fn remove_plugin(binding: &str, capid: &str) -> Result<()> {
+    PLUGMAN.write().unwrap().remove_plugin(binding, capid)
 }

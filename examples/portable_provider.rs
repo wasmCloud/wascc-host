@@ -1,27 +1,32 @@
 use std::collections::HashMap;
-use wascc_host::{host, Actor, NativeCapability, WasiParams};
+use wascc_host::{Actor, NativeCapability, WasccHost, WasiParams};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(Actor::from_file("./examples/.assets/wasi_consumer.wasm")?)?;
-    host::add_capability(
+    let host = WasccHost::new();
+    host.add_actor(Actor::from_file("./examples/.assets/wasi_consumer.wasm")?)?;
+    host.add_capability(
         Actor::from_file("./examples/.assets/wasi_provider.wasm")?,
+        None,
         WasiParams::default(),
     )?; // WASI default does not map file system access
 
-    host::add_native_capability(NativeCapability::from_file(
+    host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
+        None,
     )?)?;
 
-    host::configure(
+    host.bind_actor(
         "MDNPIQOU5EEHTP4TKY2APFOJTTEYYARN3ZIJTRWRYWHX6B4MFSO6ZCRT",
         "wascc:wasidemo",
+        None,
         HashMap::new(),
     )?;
 
-    host::configure(
+    host.bind_actor(
         "MDNPIQOU5EEHTP4TKY2APFOJTTEYYARN3ZIJTRWRYWHX6B4MFSO6ZCRT",
         "wascc:http_server",
+        None,
         generate_port_config(8081),
     )?;
 

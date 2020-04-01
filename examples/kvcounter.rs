@@ -1,24 +1,29 @@
 use std::collections::HashMap;
-use wascc_host::{host, Actor, NativeCapability};
+use wascc_host::{Actor, NativeCapability, WasccHost};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
-    host::add_native_capability(NativeCapability::from_file(
+    let host = WasccHost::new();
+    host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
+    host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
+        None,
     )?)?;
-    host::add_native_capability(NativeCapability::from_file(
+    host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libredis_provider.so",
+        None,
     )?)?;
 
-    host::configure(
+    host.bind_actor(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:keyvalue",
+        None,
         redis_config(),
     )?;
-    host::configure(
+    host.bind_actor(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:http_server",
+        None,
         http_config(),
     )?;
 

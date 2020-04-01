@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+/*
 use super::router::Router;
 use super::Result;
 use crate::actor::Actor;
@@ -135,16 +135,16 @@ pub fn add_actor(actor: Actor) -> Result<()> {
 #[cfg(feature = "manifest")]
 pub fn apply_manifest(manifest: HostManifest) -> Result<()> {
     for actor in manifest.actors {
-        
+
         if cfg!(feature = "gantry") && actor.len() == 56 && actor.starts_with('M') { // This is an actor's public subject
             add_actor(Actor::from_gantry(&actor)?)?;
         } else {
             add_actor(Actor::from_file(actor)?)?;
-        }                
+        }
     }
     for cap in manifest.capabilities {
         // for now, supports only file paths
-        add_native_capability(NativeCapability::from_file(cap)?)?;
+        add_native_capability(NativeCapability::from_file(cap, None)?)?;
     }
     for config in manifest.config {
         configure(&config.actor, &config.capability, config.values)?;
@@ -157,7 +157,7 @@ fn ensure_extras() -> Result<()> {
         return Ok(());
     }
     add_native_capability(NativeCapability::from_instance(
-        crate::extras::ExtrasCapabilityProvider::default(),
+        crate::extras::ExtrasCapabilityProvider::default(), None,
     )?)?;
     Ok(())
 }
@@ -242,6 +242,7 @@ pub fn add_native_capability(capability: NativeCapability) -> Result<()> {
     let summary = CapabilitySummary {
         id: capid.clone(),
         name: capability.name(),
+        binding: capability.binding_name.to_string(),
         portable: false,
     };
     CAPS.write().unwrap().push(summary);
@@ -439,6 +440,7 @@ fn spawn_actor_and_listen(
                 CAPS.write().unwrap().push(CapabilitySummary {
                     id: route_key.clone(),
                     name: route_key.clone(),
+                    binding: "default".to_string(), // TODO: fix
                     portable: true,
                 });
             }
@@ -527,6 +529,7 @@ fn deconfigure_actor(key: &str) {
 /// namespace-delimited string like `wapc:messaging` or `wapc:keyvalue`.
 fn host_callback(
     id: u64,
+    bd: &str,
     ns: &str,
     op: &str,
     payload: &[u8],
@@ -634,3 +637,4 @@ impl InvocationResponse {
         }
     }
 }
+*/

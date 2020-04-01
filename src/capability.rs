@@ -18,10 +18,11 @@ use libloading::Symbol;
 use std::ffi::OsStr;
 use wascc_codec::capabilities::CapabilityProvider;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CapabilitySummary {
     pub name: String,
     pub id: String,
+    pub binding: String,
     pub portable: bool,
 }
 
@@ -31,6 +32,7 @@ pub struct CapabilitySummary {
 pub struct NativeCapability {
     pub(crate) capid: String,
     pub(crate) plugin: Box<dyn CapabilityProvider>,
+    pub(crate) binding_name: String,
     // This field is solely used to keep the FFI library instance allocated for the same
     // lifetime as the boxed plugin
     #[allow(dead_code)]
@@ -40,7 +42,7 @@ pub struct NativeCapability {
 impl NativeCapability {
     /// Reads a capability provider from a file. The capability provider must implement the
     /// correct FFI interface to support waSCC plugins
-    pub fn from_file<P: AsRef<OsStr>>(filename: P) -> Result<Self> {
+    pub fn from_file<P: AsRef<OsStr>>(filename: P, binding_name: Option<String>) -> Result<Self> {
         type PluginCreate = unsafe fn() -> *mut dyn CapabilityProvider;
 
         let library = Library::new(filename.as_ref())?;
@@ -61,17 +63,22 @@ impl NativeCapability {
         Ok(NativeCapability {
             capid,
             plugin,
+            binding_name: binding_name.unwrap_or("default".to_string()),
             library: Some(library),
         })
     }
 
     /// If you know ahead of time that you want a particular capability provider to be a compile-time
     /// dependency, you can create your own provider instance and pass it to this function
-    pub fn from_instance(instance: impl CapabilityProvider) -> Result<Self> {
+    pub fn from_instance(
+        instance: impl CapabilityProvider,
+        binding_name: Option<String>,
+    ) -> Result<Self> {
         let capid = instance.capability_id();
         Ok(NativeCapability {
             capid: capid.to_string(),
             plugin: Box::new(instance),
+            binding_name: binding_name.unwrap_or("default".to_string()),
             library: None,
         })
     }
