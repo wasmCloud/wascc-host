@@ -1,5 +1,5 @@
 [![crates.io](https://img.shields.io/crates/v/wascc-host.svg)](https://crates.io/crates/wascc-host)&nbsp;
-![travis](https://travis-ci.org/wascc/wascc-host.svg?branch=master)&nbsp;
+![Rust build](https://github.com/wascc/wascc-host/workflows/Rust/badge.svg)&nbsp;
 ![license](https://img.shields.io/crates/l/wascc-host.svg)&nbsp;
 [![documentation](https://docs.rs/wascc-host/badge.svg)](https://docs.rs/wascc-host)
 
