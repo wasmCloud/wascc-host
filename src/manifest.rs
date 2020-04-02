@@ -84,16 +84,16 @@ mod test {
             capabilities: vec![
                 Capability {
                     path: "one".to_string(),
-                    binding_name: "default".to_string(),
+                    binding_name: Some("default".to_string()),
                 },
                 Capability {
                     path: "two".to_string(),
-                    binding_name: "default".to_string(),
+                    binding_name: Some("default".to_string()),
                 },
             ],
             bindings: vec![BindingEntry {
                 actor: "a".to_string(),
-                binding: "default".to_string(),
+                binding: Some("default".to_string()),
                 capability: "wascc:one".to_string(),
                 values: gen_values(),
             }],
