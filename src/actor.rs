@@ -1,4 +1,4 @@
-// Copyright 2015-2019 Capital One Services, LLC
+// Copyright 2015-2020 Capital One Services, LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ use std::io::prelude::*;
 use std::path::Path;
 use wascap::jwt::Token;
 
-/// An actor is a WebAssembly module that can consume capabilities exposed by capability providers
+/// An actor is a WebAssembly module that conforms to the waSCC protocols and can securely
+/// consume capabilities exposed by native or portable capability providers
 #[derive(Debug)]
 pub struct Actor {
     pub(crate) token: Token<wascap::jwt::Actor>,
@@ -27,13 +28,14 @@ pub struct Actor {
 }
 
 impl Actor {
-    /// Create an actor from the bytes (must be a signed module) of a WebAssembly module
+    /// Create an actor from the bytes of a signed WebAssembly module. Attempting to load
+    /// an unsigned module, or a module signed improperly, will result in an error
     pub fn from_bytes(buf: Vec<u8>) -> Result<Actor> {
         let token = authz::extract_claims(&buf)?;
         Ok(Actor { token, bytes: buf })
     }
 
-    /// Create an actor from a WebAssembly (`.wasm`) file
+    /// Create an actor from a signed WebAssembly (`.wasm`) file
     pub fn from_file(path: impl AsRef<Path>) -> Result<Actor> {
         let mut file = File::open(path)?;
         let mut buf = Vec::new();
@@ -42,7 +44,8 @@ impl Actor {
         Actor::from_bytes(buf)
     }
 
-    /// Create an actor from the Gantry registry
+    /// Create an actor by looking it up in a Gantry repository and downloading
+    /// the signed module bytes
     #[cfg(feature = "gantry")]
     pub fn from_gantry(actor: &str) -> Result<Actor> {
         use crossbeam_channel::unbounded;
@@ -50,25 +53,26 @@ impl Actor {
         let (s, r) = unbounded();
         let bytevec = Arc::new(RwLock::new(Vec::new()));
         let b = bytevec.clone();
-        let _ack = crate::host::GANTRYCLIENT
-            .read()
-            .unwrap()
-            .download_actor(actor, move |chunk| {
-                bytevec
-                    .write()
-                    .unwrap()
-                    .extend_from_slice(&chunk.chunk_bytes);
-                if chunk.sequence_no == chunk.total_chunks {
-                    s.send(true).unwrap();
-                }
-                Ok(())
-            });
+        let _ack =
+            crate::inthost::GANTRYCLIENT
+                .read()
+                .unwrap()
+                .download_actor(actor, move |chunk| {
+                    bytevec
+                        .write()
+                        .unwrap()
+                        .extend_from_slice(&chunk.chunk_bytes);
+                    if chunk.sequence_no == chunk.total_chunks {
+                        s.send(true).unwrap();
+                    }
+                    Ok(())
+                });
         let _ = r.recv().unwrap();
         let vec = b.read().unwrap();
         Actor::from_bytes(vec.clone())
     }
 
-    /// Obtain the actor's public key. This is globally unique identifier
+    /// Obtain the actor's public key (The `sub` field of a JWT). This can be treated as a globally unique identifier
     pub fn public_key(&self) -> String {
         self.token.claims.subject.to_string()
     }
@@ -81,7 +85,7 @@ impl Actor {
         }
     }
 
-    /// Obtain the public key of the issuer of the actor's signed token
+    /// Obtain the public key of the issuer of the actor's signed token (the `iss` field of the JWT)
     pub fn issuer(&self) -> String {
         self.token.claims.issuer.to_string()
     }

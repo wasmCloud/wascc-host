@@ -1,3 +1,8 @@
+// A default implementation of the "wascc:extras" provider that is always included
+// with the host runtime. This provides functionality for generating random numbers,
+// generating a guid, and generating a sequence number... things that a standalone
+// WASM module cannot do.
+
 use std::error::Error;
 use std::sync::{Arc, RwLock};
 use std::{
@@ -33,7 +38,9 @@ impl ExtrasCapabilityProvider {
     ) -> Result<Vec<u8>, Box<dyn Error>> {
         let uuid = Uuid::new_v4();
         let result = GeneratorResult {
-            value: GeneratorResultType::Guid(format!("{}", uuid)),
+            guid: Some(format!("{}", uuid)),
+            random_number: 0,
+            sequence_number: 0,
         };
 
         Ok(serialize(&result)?)
@@ -47,17 +54,20 @@ impl ExtrasCapabilityProvider {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
         let result = if let GeneratorRequest {
-            typ: GeneratorRequestType::RandomNumber(min, max),
+            random: true,
+            min,
+            max,
+            ..
         } = msg
         {
             let n: u32 = rng.gen_range(min, max);
             GeneratorResult {
-                value: GeneratorResultType::RandomNumber(n),
+                random_number: n,
+                sequence_number: 0,
+                guid: None,
             }
         } else {
-            GeneratorResult {
-                value: GeneratorResultType::RandomNumber(0),
-            }
+            GeneratorResult::default()
         };
 
         Ok(serialize(result)?)
@@ -74,7 +84,9 @@ impl ExtrasCapabilityProvider {
             .or_insert(AtomicU64::new(0))
             .fetch_add(1, Ordering::SeqCst);
         let result = GeneratorResult {
-            value: GeneratorResultType::SequenceNumber(seq),
+            sequence_number: seq,
+            random_number: 0,
+            guid: None,
         };
         Ok(serialize(&result)?)
     }

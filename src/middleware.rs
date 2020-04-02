@@ -63,8 +63,6 @@ pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<Invo
         }
     };
 
-    info!("invocation {} - base64 {}", inv.operation, base64::encode(inv.msg.clone()));
-
     let inv_r = match guest.call(&inv.operation, &inv.msg) {
         Ok(v) => InvocationResponse::success(v),
         Err(e) => InvocationResponse::error(&format!("Failed to invoke guest call: {}", e)),

@@ -18,7 +18,7 @@ use std::error::Error;
 use wascc_codec::capabilities::Dispatcher;
 
 /// A dispatcher is given to each capability provider, allowing it to send
-/// commands in to the guest module (via the muxer) and await replies. This dispatch
+/// commands in to the guest module and await replies. This dispatch
 /// is one way, and is _not_ used for the guest module to send commands to capabilities
 #[derive(Clone)]
 pub(crate) struct WasccNativeDispatcher {
@@ -42,6 +42,7 @@ impl WasccNativeDispatcher {
 }
 
 impl Dispatcher for WasccNativeDispatcher {
+    /// Called by a capability provider to invoke a function on an actor
     fn dispatch(&self, actor: &str, op: &str, msg: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
         trace!(
             "Dispatching operation '{}' ({} bytes) to actor",

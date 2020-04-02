@@ -44,7 +44,7 @@ impl PluginManager {
         capid: &str,
         dispatcher: WasccNativeDispatcher,
     ) -> Result<()> {
-        let key = route_key(Some(binding), capid);
+        let key = route_key(binding, capid);
         match self.plugins.get(&key) {
             Some(p) => match p.plugin.configure_dispatch(Box::new(dispatcher)) {
                 Ok(_) => Ok(()),
@@ -60,7 +60,7 @@ impl PluginManager {
 
     pub fn call(&self, inv: &Invocation) -> Result<InvocationResponse> {
         if let InvocationTarget::Capability { capid, binding } = &inv.target {
-            let route_key = route_key(Some(&binding), &capid);
+            let route_key = route_key(&binding, &capid);
             match self.plugins.get(&route_key) {
                 // native capability is registered via plugin
                 Some(c) => match c.plugin.handle_call(&inv.origin, &inv.operation, &inv.msg) {
@@ -69,12 +69,12 @@ impl PluginManager {
                 },
                 // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
                 None => {
-                    if let Some(entry) = get_route(Some(&binding), &capid) {
+                    if let Some(entry) = get_route(&binding, &capid) {
                         entry.invoke(inv.clone())
                     } else {
                         Err(errors::new(ErrorKind::CapabilityProvider(format!(
-                            "No such capability ID registered as native plug-in or portable provider: {}",
-                            capid
+                            "No such capability ID registered as native plug-in or portable provider: {:?}",
+                            route_key
                         ))))
                     }
                 }
@@ -87,7 +87,7 @@ impl PluginManager {
     }
 
     pub fn add_plugin(&mut self, plugin: NativeCapability) -> Result<()> {
-        let key = route_key(Some(&plugin.binding_name), &plugin.capid);
+        let key = route_key(&plugin.binding_name, &plugin.capid);
         if self.plugins.contains_key(&key) {
             Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Duplicate capability ID attempted to register provider: ({},{})",
@@ -100,7 +100,7 @@ impl PluginManager {
     }
 
     pub fn remove_plugin(&mut self, binding: &str, capid: &str) -> Result<()> {
-        let key = route_key(Some(&binding), &capid);
+        let key = route_key(&binding, &capid);
         if let Some(plugin) = self.plugins.remove(&key) {
             drop(plugin);
         }

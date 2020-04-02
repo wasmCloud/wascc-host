@@ -12,22 +12,22 @@ const ACTOR_SUBJECT: &str = "MCYWHMJW5VW5U7ZRDQV7JU45GHSR2SA6OZJ2MPHQCFALR2CGFA2
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let host = WasccHost::new();
-    host.add_actor(Actor::from_file("./examples/.assets/multibinding.wasm")?)?;    
+    host.add_actor(Actor::from_file("./examples/.assets/multibinding.wasm")?)?;
     host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
         None,
     )?)?;
 
     // Add TWO Redis providers. Note that these do NOT have to be the same provider...
-    // we could use Redis and an in-memory store or Redis and Cassandra or 
+    // we could use Redis and an in-memory store or Redis and Cassandra or
     // Cassandra and etcd and so on
     host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libredis_provider.so",
-        Some("source1"),
+        Some("source1".to_string()),
     )?)?;
     host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libredis_provider.so",
-        Some("source2"),
+        Some("source2".to_string()),
     )?)?;
 
     host.bind_actor(
@@ -40,17 +40,16 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     host.bind_actor(
         ACTOR_SUBJECT,
         "wascc:keyvalue",
-        Some("source1"),
+        Some("source1".to_string()),
         redis_config(0),
     )?;
 
     host.bind_actor(
         ACTOR_SUBJECT,
         "wascc:keyvalue",
-        Some("source2"),
+        Some("source2".to_string()),
         redis_config(1),
     )?;
-    
 
     std::thread::park();
 
@@ -59,7 +58,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
 fn redis_config(dbindex: u32) -> HashMap<String, String> {
     let mut hm = HashMap::new();
-    hm.insert("URL".to_string(), format!("redis://127.0.0.1:6379/{}", dbindex));
+    hm.insert(
+        "URL".to_string(),
+        format!("redis://127.0.0.1:6379/{}", dbindex),
+    );
 
     hm
 }

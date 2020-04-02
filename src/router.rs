@@ -58,7 +58,7 @@ impl RouteEntry {
 impl Router {
     pub fn add_route(
         &mut self,
-        binding: Option<&str>,
+        binding: &str,
         id: &str,
         inv_s: Sender<Invocation>,
         resp_r: Receiver<InvocationResponse>,
@@ -74,7 +74,7 @@ impl Router {
         );
     }
 
-    pub fn get_route(&self, binding: Option<&str>, id: &str) -> Option<RouteEntry> {
+    pub fn get_route(&self, binding: &str, id: &str) -> Option<RouteEntry> {
         let key = route_key(binding, id);
         match self.routes.get(&key) {
             Some(p) => Some(p.clone()),
@@ -82,16 +82,16 @@ impl Router {
         }
     }
 
-    pub fn remove_route(&mut self, binding: Option<&str>, id: &str) {
+    pub fn remove_route(&mut self, binding: &str, id: &str) {
         self.routes.remove(&route_key(binding, id));
     }
 
-    pub fn route_exists(&self, binding: Option<&str>, id: &str) -> bool {
+    pub fn route_exists(&self, binding: &str, id: &str) -> bool {
         let key = route_key(binding, id);
         self.routes.contains_key(&key)
     }
 
-    pub fn terminate_route(&mut self, binding: Option<&str>, id: &str) -> Result<()> {
+    pub fn terminate_route(&mut self, binding: &str, id: &str) -> Result<()> {
         let key = route_key(binding, id);
         if let Some((_key, entry)) = self.routes.remove_entry(&key) {
             entry.terminate();
@@ -126,24 +126,24 @@ fn captarget_for_key(key: RouteKey) -> InvocationTarget {
     }
 }
 
-pub(crate) fn route_key(binding: Option<&str>, id: &str) -> RouteKey {
-    (binding.unwrap_or("default").to_string(), id.to_string())
+pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
+    (binding.to_string(), id.to_string())
 }
 
-pub(crate) fn route_exists(binding: Option<&str>, id: &str) -> bool {
+pub(crate) fn route_exists(binding: &str, id: &str) -> bool {
     ROUTER.read().unwrap().route_exists(binding, id)
 }
 
-pub(crate) fn get_route(binding: Option<&str>, id: &str) -> Option<RouteEntry> {
+pub(crate) fn get_route(binding: &str, id: &str) -> Option<RouteEntry> {
     ROUTER.read().unwrap().get_route(binding, id)
 }
 
-pub(crate) fn remove_route(binding: Option<&str>, id: &str) {
+pub(crate) fn remove_route(binding: &str, id: &str) {
     ROUTER.write().unwrap().remove_route(binding, id);
 }
 
 pub(crate) fn register_route(
-    binding: Option<&str>,
+    binding: &str,
     route_key: &str,
     inv_s: Sender<Invocation>,
     resp_r: Receiver<InvocationResponse>,

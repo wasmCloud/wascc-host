@@ -4,8 +4,8 @@ use wascc_host::{Actor, NativeCapability, WasccHost};
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let host = WasccHost::new();
-    host.add_actor(Actor::from_file("./examples/.assets/as-actor.wasm")?)?;    
-    host.add_native_capability(NativeCapability::from_file(        
+    host.add_actor(Actor::from_file("./examples/.assets/as-actor.wasm")?)?;
+    host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
         None,
     )?)?;
@@ -39,7 +39,6 @@ fn generate_port_config(port: u16) -> HashMap<String, String> {
 
     hm
 }
-
 
 fn redis_config() -> HashMap<String, String> {
     let mut hm = HashMap::new();

@@ -12,7 +12,7 @@ pub struct HostManifest {
 #[cfg_attr(feature = "manifest", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capability {
     pub path: String,
-    pub binding_name: String,
+    pub binding_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,7 +20,7 @@ pub struct Capability {
 pub struct BindingEntry {
     pub actor: String,
     pub capability: String,
-    pub binding: String,
+    pub binding: Option<String>,
     pub values: HashMap<String, String>,
 }
 

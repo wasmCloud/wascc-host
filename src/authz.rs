@@ -1,4 +1,4 @@
-// Copyright 2015-2019 Capital One Services, LLC
+// Copyright 2015-2020 Capital One Services, LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,11 +30,8 @@ lazy_static! {
 
 type AuthHook = dyn Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static;
 
-/// Setting a custom authorization hook allows your code to make additional decisions
-/// on whether or not a given actor is allowed to run within the host. The authorization
-/// hook takes a `Token` as input and returns a boolean indicating the validity of the module.
 #[allow(dead_code)]
-pub fn set_auth_hook<F>(hook: F)
+pub(crate) fn set_auth_hook<F>(hook: F)
 where
     F: Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static,
 {
@@ -93,13 +90,14 @@ pub(crate) fn get_claims(pk: &str) -> Option<Claims<wascap::jwt::Actor>> {
     CLAIMS.read().unwrap().get(pk).cloned()
 }
 
-/// Extract claims from the JWT embedded in the wasm module's custom section
+// Extract claims from the JWT embedded in the wasm module's custom section
 pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token<wascap::jwt::Actor>> {
     let token = wascap::wasm::extract_claims(buf)?;
     match token {
         Some(token) => {
-            enforce_validation(&token.jwt)?;
+            enforce_validation(&token.jwt)?; // returns an `Err` if validation fails
             if !check_auth(&token) {
+                // invoke the auth hook, if there is one
                 return Err(errors::new(errors::ErrorKind::Authorization(
                     "Authorization hook denied access to module".into(),
                 )));
