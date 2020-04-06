@@ -74,10 +74,11 @@ impl NativeCapability {
         })
     }
 
-    /// If you know ahead of time that you want a particular capability provider to be a compile-time
-    /// dependency, you can create your own provider instance and pass it to this function.
-    /// WARNING: you can only register a single capability provider from an instance per runtime host because
-    /// the FFI function used by the plugins is globally scoped.
+    /// This function is to be used for _capability embedding_. If you are building a custom
+    /// waSCC host and have a fixed set of capabilities that you want to always be available
+    /// to actors, then you can declare a dependency on the capability provider, enable
+    /// the `static_plugin` feature, and provide an instance of that provider. Be sure to check
+    /// that the provider supports capability embedding.    
     pub fn from_instance(
         instance: impl CapabilityProvider,
         binding_name: Option<String>,
