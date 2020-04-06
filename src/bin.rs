@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use structopt::clap::AppSettings;
 use structopt::StructOpt;
-use wascc_host::{host, HostManifest};
+use wascc_host::{HostManifest, WasccHost};
 
 #[macro_use]
 extern crate log;
@@ -30,13 +30,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args = Cli::from_args();
     let cmd = args.command;
     env_logger::init();
+    let host = WasccHost::new();
 
     let manifest = HostManifest::from_yaml(cmd.manifest_path, cmd.expand_env)?;
     info!(
         "waSCC Host Manifest loaded, CWD: {:?}",
         std::env::current_dir()?
     );
-    host::apply_manifest(manifest)?;
+    host.apply_manifest(manifest)?;
 
     std::thread::park();
 

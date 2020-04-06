@@ -4,15 +4,23 @@ use std::collections::HashMap;
 #[cfg_attr(feature = "manifest", derive(serde::Serialize, serde::Deserialize))]
 pub struct HostManifest {
     pub actors: Vec<String>,
-    pub capabilities: Vec<String>,
-    pub config: Vec<ConfigEntry>,
+    pub capabilities: Vec<Capability>,
+    pub bindings: Vec<BindingEntry>,
 }
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "manifest", derive(serde::Serialize, serde::Deserialize))]
-pub struct ConfigEntry {
+pub struct Capability {
+    pub path: String,
+    pub binding_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "manifest", derive(serde::Serialize, serde::Deserialize))]
+pub struct BindingEntry {
     pub actor: String,
     pub capability: String,
+    pub binding: Option<String>,
     pub values: HashMap<String, String>,
 }
 
@@ -66,31 +74,55 @@ impl HostManifest {
 #[cfg(feature = "manifest")]
 #[cfg(test)]
 mod test {
-    use super::ConfigEntry;
+    use super::{BindingEntry, Capability};
     use std::collections::HashMap;
 
     #[test]
     fn round_trip() {
         let manifest = super::HostManifest {
             actors: vec!["a".to_string(), "b".to_string(), "c".to_string()],
-            capabilities: vec!["wascc:one".to_string(), "wascc:two".to_string()],
-            config: vec![ConfigEntry {
+            capabilities: vec![
+                Capability {
+                    path: "one".to_string(),
+                    binding_name: Some("default".to_string()),
+                },
+                Capability {
+                    path: "two".to_string(),
+                    binding_name: Some("default".to_string()),
+                },
+            ],
+            bindings: vec![BindingEntry {
                 actor: "a".to_string(),
+                binding: Some("default".to_string()),
                 capability: "wascc:one".to_string(),
                 values: gen_values(),
             }],
         };
         let yaml = serde_yaml::to_string(&manifest).unwrap();
-        assert_eq!(yaml, "---\nactors:\n  - a\n  - b\n  - c\ncapabilities:\n  - \"wascc:one\"\n  - \"wascc:two\"\nconfig:\n  - actor: a\n    capability: \"wascc:one\"\n    values:\n      ROOT: /tmp");
+        assert_eq!(yaml, "---\nactors:\n  - a\n  - b\n  - c\ncapabilities:\n  - path: one\n    binding_name: default\n  - path: two\n    binding_name: default\nbindings:\n  - actor: a\n    capability: \"wascc:one\"\n    binding: default\n    values:\n      ROOT: /tmp");
     }
 
     #[test]
     fn env_expansion() {
-        let values = vec!["echo Test", "echo $TEST_EXPAND_ENV_TEMP", "echo ${TEST_EXPAND_ENV_TEMP}", "echo ${TEST_EXPAND_ENV_TMP}"];
-        let expected = vec!["echo Test", "echo $TEST_EXPAND_ENV_TEMP", "echo /tmp", "echo ${TEST_EXPAND_ENV_TMP}"];
+        let values = vec![
+            "echo Test",
+            "echo $TEST_EXPAND_ENV_TEMP",
+            "echo ${TEST_EXPAND_ENV_TEMP}",
+            "echo ${TEST_EXPAND_ENV_TMP}",
+        ];
+        let expected = vec![
+            "echo Test",
+            "echo $TEST_EXPAND_ENV_TEMP",
+            "echo /tmp",
+            "echo ${TEST_EXPAND_ENV_TMP}",
+        ];
 
         envmnt::set("TEST_EXPAND_ENV_TEMP", "/tmp");
-        for (got, expected) in values.iter().map(|v| super::HostManifest::expand_env(v)).zip(expected.iter()) {
+        for (got, expected) in values
+            .iter()
+            .map(|v| super::HostManifest::expand_env(v))
+            .zip(expected.iter())
+        {
             assert_eq!(*expected, got);
         }
         envmnt::remove("TEST_EXPAND_ENV_TEMP");

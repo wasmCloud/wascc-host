@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::host::{Invocation, InvocationResponse};
 use crate::Result;
+use crate::{Invocation, InvocationResponse};
 use std::sync::Arc;
 use std::sync::RwLock;
 use wapc::WapcHost;
@@ -32,7 +32,8 @@ pub trait Middleware: Send + Sync + 'static {
 }
 
 pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
-    let inv = match run_capability_pre_invoke(inv.clone(), &MIDDLEWARES.read().unwrap()) {
+    let mw = &MIDDLEWARES.read().unwrap();
+    let inv = match run_capability_pre_invoke(inv.clone(), mw) {
         Ok(i) => i,
         Err(e) => {
             error!("Middleware failure: {}", e);
@@ -53,7 +54,8 @@ pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
 }
 
 pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<InvocationResponse> {
-    let inv = match run_actor_pre_invoke(inv.clone(), &MIDDLEWARES.read().unwrap()) {
+    let mw = &MIDDLEWARES.read().unwrap();
+    let inv = match run_actor_pre_invoke(inv.clone(), mw) {
         Ok(i) => i,
         Err(e) => {
             error!("Middleware failure: {}", e);
@@ -72,6 +74,10 @@ pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<Invo
             Ok(inv_r)
         }
     }
+}
+
+pub(crate) fn add_middleware(md: impl Middleware) {
+    MIDDLEWARES.write().unwrap().push(Box::new(md))
 }
 
 fn run_actor_pre_invoke(
@@ -142,8 +148,8 @@ mod test {
     }
 
     use super::Middleware;
-    use crate::host::Invocation;
-    use crate::host::InvocationResponse;
+    use crate::inthost::Invocation;
+    use crate::inthost::{InvocationResponse, InvocationTarget};
     use crate::Result;
 
     struct IncMiddleware {
@@ -187,7 +193,11 @@ mod test {
         let mids: Vec<Box<dyn Middleware>> = vec![Box::new(inc_mid)];
         let inv = Invocation::new(
             "test".to_string(),
-            "testing:sample!Foo",
+            InvocationTarget::Capability {
+                capid: "testing:sample".to_string(),
+                binding: "default".to_string(),
+            },
+            "testing",
             b"abc1234".to_vec(),
         );
         let res = super::run_actor_pre_invoke(inv.clone(), &mids);

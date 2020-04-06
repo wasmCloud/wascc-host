@@ -1,28 +1,31 @@
 use std::collections::HashMap;
-use wascc_host::host::{self, Invocation, InvocationResponse};
-use wascc_host::{Actor, Middleware, NativeCapability};
+use wascc_host::{Actor, Invocation, InvocationResponse, Middleware, NativeCapability, WasccHost};
 
 #[macro_use]
 extern crate log;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
-    host::add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
-    host::add_native_capability(NativeCapability::from_file(
+    let host = WasccHost::new();
+    host.add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
+    host.add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
+    host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
+        None,
     )?)?;
 
-    host::add_middleware(LoggingMiddleware::default());
+    host.add_middleware(LoggingMiddleware::default());
 
-    host::configure(
+    host.bind_actor(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
+        None,
         generate_port_config(8081),
     )?;
-    host::configure(
+    host.bind_actor(
         "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
         "wascc:http_server",
+        None,
         generate_port_config(8082),
     )?;
 

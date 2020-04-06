@@ -1,23 +1,27 @@
 use std::collections::HashMap;
-use wascc_host::{host, Actor, NativeCapability};
+use wascc_host::{Actor, NativeCapability, WasccHost};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    host::add_actor(Actor::from_file("./examples/.assets/subscriber.wasm")?)?;
-    host::add_actor(Actor::from_file("./examples/.assets/subscriber2.wasm")?)?;
-    host::add_native_capability(NativeCapability::from_file(
+    let host = WasccHost::new();
+    host.add_actor(Actor::from_file("./examples/.assets/subscriber.wasm")?)?;
+    host.add_actor(Actor::from_file("./examples/.assets/subscriber2.wasm")?)?;
+    host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libnats_provider.so",
+        None,
     )?)?;
 
-    host::configure(
+    host.bind_actor(
         "MBHRSJORBXAPRCALK6EKOBBCNAPMRTM6ODLXNLOV5TKPDMPXMTCMR4DW",
         "wascc:messaging",
+        None,
         generate_config("test"),
     )?;
 
-    host::configure(
+    host.bind_actor(
         "MDJUPIQFWEHWE4XHPWHOJLW42SJDPVBQVDC2NV3T3O4ELXXVOXLA5M4I",
         "wascc:messaging",
+        None,
         generate_config("second_test"),
     )?;
     std::thread::park();

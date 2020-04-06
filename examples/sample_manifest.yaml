@@ -3,9 +3,9 @@
 actors:
     - ./examples/.assets/kvcounter.wasm
 capabilities:
-    - ./examples/.assets/libredis_provider.so
-    - ./examples/.assets/libwascc_httpsrv.so
-config:
+    - path: ./examples/.assets/libredis_provider.so      
+    - path: ./examples/.assets/libwascc_httpsrv.so
+bindings:
     - actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ"
       capability: "wascc:keyvalue"
       values:
