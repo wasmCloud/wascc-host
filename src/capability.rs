@@ -94,7 +94,7 @@ impl NativeCapability {
 
     /// Returns the capability ID (namespace) of the provider
     pub fn id(&self) -> String {
-        self.capid.clone()
+        self.capid.to_string()
     }
 
     /// Returns the human-friendly name of the provider
