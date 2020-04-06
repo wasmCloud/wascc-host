@@ -16,7 +16,7 @@ use std::thread;
 use wapc::prelude::*;
 use wascap::jwt::Claims;
 use wascc_codec::{
-    core::{CapabilityConfiguration, OP_CONFIGURE, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
+    core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
     serialize,
 };
 pub(crate) const ACTOR_BINDING: &str = "__actor__"; // A marker namespace for looking up the route to an actor's dispatcher
@@ -42,8 +42,7 @@ impl WasccHost {
         wasi: Option<WasiParams>,
         actor: bool,
         binding: String,
-    ) -> Result<()> {        
-
+    ) -> Result<()> {
         thread::spawn(move || {
             info!(
                 "Loading {} module...",
@@ -199,11 +198,7 @@ pub(crate) fn remove_cap(capid: &str) {
 pub(crate) fn replace_actor(new_actor: Actor) -> Result<()> {
     let public_key = new_actor.token.claims.subject;
 
-    match ROUTER
-        .read()
-        .unwrap()
-        .get_route(ACTOR_BINDING, &public_key)
-    {
+    match ROUTER.read().unwrap().get_route(ACTOR_BINDING, &public_key) {
         Some(ref entry) => {
             match entry.invoke(gen_liveupdate_invocation(&public_key, new_actor.bytes)) {
                 Ok(_) => {
@@ -413,11 +408,11 @@ pub(crate) fn gen_config_invocation(
     let payload = serialize(&cfgvals).unwrap();
     Invocation {
         msg: payload,
-        operation: OP_CONFIGURE.to_string(),
+        operation: OP_BIND_ACTOR.to_string(),
         origin: "system".to_string(),
         target: InvocationTarget::Capability {
             capid: capid.to_string(),
-            binding
+            binding,
         },
     }
 }

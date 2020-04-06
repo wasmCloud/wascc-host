@@ -164,14 +164,10 @@ impl WasccHost {
         if route_exists(&binding, &capid) {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, 
-                binding)              
+                binding)
             )));
         }
-        info!(
-            "Adding portable capability to host: {},{}",
-            binding,
-            capid
-        );
+        info!("Adding portable capability to host: {},{}", binding, capid);
         let wg = crossbeam_utils::sync::WaitGroup::new();
         self.spawn_actor_and_listen(
             wg.clone(),
@@ -264,7 +260,7 @@ impl WasccHost {
         capid: &str,
         binding_name: Option<String>,
         config: HashMap<String, String>,
-    ) -> Result<()> {        
+    ) -> Result<()> {
         if !authz::can_invoke(actor, capid) {
             return Err(errors::new(errors::ErrorKind::Authorization(format!(
                 "Unauthorized binding: actor {} is not authorized to use capability {}.",

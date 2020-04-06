@@ -15,7 +15,6 @@ exclude = ["examples/.assets"]
 
 [badges]
 maintenance = { status = "actively-developed" }
-travis-ci = { repository = "wascc/wascc-host", branch = "master" }
 
 [dependencies]
 libloading = "0.5.2"
@@ -23,8 +22,7 @@ crossbeam-channel = "0.4.2"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
 wapc = "0.5.0"
-#wascc-codec = "0.5.2"
-wascc-codec = { path = "../wascc-codec" }
+wascc-codec = "0.6.0"
 wascap = "0.4.5"
 log = "0.4.8"
 lazy_static = "1.4.0"

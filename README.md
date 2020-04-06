@@ -21,8 +21,6 @@ Where the example name is the name (without the `.rs`) of any of the examples in
 
 **Pre-Requisites** - For the `subscriber` example, you will need an instance of [NATS](https://nats.io) running locally. For the `kvcounter` example, you will need **Redis** running locally on the default port.
 
-**WARNING** - This API is experimental and subject to breaking changes.
-
 **NOTE** - All of these examples use _native_ capability providers, and therefore utilize the linux dynamic libraries (`.so` files). To use these examples on a Mac, you will need to manully build Mac dynamic libraries (`.dylib` files) and modify the examples to read those files instead.
 
 ## waSCC on Kubernetes
