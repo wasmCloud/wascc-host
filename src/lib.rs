@@ -87,7 +87,7 @@ extern crate crossbeam;
 pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
 pub use capability::{CapabilitySummary, NativeCapability};
-pub use inthost::{Invocation, InvocationResponse};
+pub use inthost::{Invocation, InvocationTarget, InvocationResponse};
 
 #[cfg(feature = "manifest")]
 pub use manifest::{BindingEntry, HostManifest};
@@ -113,7 +113,7 @@ mod router;
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use crate::router::{get_route, route_exists};
-use inthost::{InvocationTarget, ACTOR_BINDING};
+use inthost::ACTOR_BINDING;
 use std::collections::HashMap;
 use wascap::jwt::{Claims, Token};
 
