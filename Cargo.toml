@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.6.1"
+version = "0.6.2"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -17,7 +17,7 @@ exclude = ["examples/.assets"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-libloading = "0.5.2"
+libloading = "0.6.0"
 crossbeam-channel = "0.4.2"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
@@ -38,13 +38,17 @@ serde_yaml = { version = "0.8.11", optional = true }
 serde_json = { version = "1.0", optional = true }
 envmnt = { version = "0.8.1", optional = true }
 
-structopt = { version = "0.3.12", optional = true }
+structopt = { version = "0.3.13", optional = true }
 
 [features]
 default = []
 manifest = ["serde", "serde_yaml", "serde_json", "envmnt"]
 bin = ["structopt"]
 gantry = ["gantryclient"]
+
+[[example]]
+name = "kvcounter_manifest"
+required-features = ["manifest"]
 
 [[bin]]
 name = "wascc-host"

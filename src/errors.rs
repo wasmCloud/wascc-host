@@ -33,6 +33,7 @@ pub enum ErrorKind {
     IO(std::io::Error),
     CapabilityProvider(String),
     MiscHost(String),
+    Plugin(libloading::Error),
 }
 
 impl Error {
@@ -55,6 +56,7 @@ impl StdError for Error {
             ErrorKind::Authorization(_) => "Module authorization failure",
             ErrorKind::CapabilityProvider(_) => "Capability provider failure",
             ErrorKind::MiscHost(_) => "waSCC Host error",
+            ErrorKind::Plugin(_) => "Plugin error"
         }
     }
 
@@ -67,6 +69,7 @@ impl StdError for Error {
             ErrorKind::IO(ref err) => Some(err),
             ErrorKind::CapabilityProvider(_) => None,
             ErrorKind::MiscHost(_) => None,
+            ErrorKind::Plugin(ref err) => Some(err),
         }
     }
 }
@@ -87,10 +90,16 @@ impl fmt::Display for Error {
                 write!(f, "Capability provider error: {}", err)
             }
             ErrorKind::MiscHost(ref err) => write!(f, "waSCC Host Error: {}", err),
+            ErrorKind::Plugin(ref err) => write!(f, "Plugin error: {}", err),
         }
     }
 }
 
+impl From<libloading::Error> for Error {
+    fn from(source: libloading::Error) -> Error {
+        Error(Box::new(ErrorKind::Plugin(source)))
+    }
+}
 impl From<wascap::Error> for Error {
     fn from(source: wascap::Error) -> Error {
         Error(Box::new(ErrorKind::Wascap(source)))
