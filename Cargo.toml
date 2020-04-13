@@ -46,6 +46,10 @@ manifest = ["serde", "serde_yaml", "serde_json", "envmnt"]
 bin = ["structopt"]
 gantry = ["gantryclient"]
 
+[[example]]
+name = "kvcounter_manifest"
+required-features = ["manifest"]
+
 [[bin]]
 name = "wascc-host"
 path = "src/bin.rs"
