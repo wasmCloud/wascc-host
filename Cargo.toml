@@ -13,6 +13,9 @@ keywords = ["webassembly", "wasm", "wasi", "wascc", "wapc"]
 categories = ["wasm", "api-bindings","command-line-utilities"]
 exclude = ["examples/.assets"]
 
+[package.metadata.docs.rs]
+features = [ "gantry", "manifest" ]
+
 [badges]
 maintenance = { status = "actively-developed" }
 
