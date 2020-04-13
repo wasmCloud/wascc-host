@@ -335,12 +335,11 @@ impl WasccHost {
     #[cfg(feature = "manifest")]
     pub fn apply_manifest(&self, manifest: HostManifest) -> Result<()> {
         for actor in manifest.actors {
-            if cfg!(feature = "gantry") && actor.len() == 56 && actor.starts_with('M') {
-                // This is an actor's public subject
-                self.add_actor(Actor::from_gantry(&actor)?)?;
-            } else {
-                self.add_actor(Actor::from_file(actor)?)?;
-            }
+            #[cfg(feature = "gantry")]
+            self.add_actor_gantry_first(&actor)?;
+
+            #[cfg(not(feature = "gantry"))]
+            self.add_actor_from_path(&actor)?;            
         }
         for cap in manifest.capabilities {
             // for now, supports only file paths
@@ -355,6 +354,21 @@ impl WasccHost {
             )?;
         }
         Ok(())
+    }
+
+    #[cfg(feature = "gantry")]
+    fn add_actor_gantry_first(&self, actor: &str) -> Result<()> {
+        if actor.len() == 56 && actor.starts_with('M') {
+            // This is an actor's public subject
+            self.add_actor(Actor::from_gantry(&actor)?)
+        } else {
+            self.add_actor(Actor::from_file(&actor)?)
+        }
+    }
+    
+    #[cfg(not(feature = "gantry"))]
+    fn add_actor_from_path(&self, actor: &str) -> Result<()> {
+        self.add_actor(Actor::from_file(actor)?)
     }
 
     /// Returns the list of actors registered in the host
