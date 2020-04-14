@@ -29,7 +29,7 @@ struct CliCommand {
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args = Cli::from_args();
     let cmd = args.command;
-    env_logger::init();
+    let _ = env_logger::builder().format_module_path(false).try_init();
     let host = WasccHost::new();
 
     let manifest = HostManifest::from_yaml(cmd.manifest_path, cmd.expand_env)?;

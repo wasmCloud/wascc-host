@@ -116,6 +116,7 @@ use crate::router::{get_route, route_exists};
 use inthost::ACTOR_BINDING;
 use std::collections::HashMap;
 use wascap::jwt::{Claims, Token};
+use wascc_codec::{serialize, core::{OP_BIND_ACTOR, CapabilityConfiguration}};
 
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
@@ -289,10 +290,22 @@ impl WasccHost {
                     Ok(())
                 }
             }
-            None => Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
-                "No such capability provider: {},{}",
-                binding, capid
-            )))),
+            None => {
+                // If a binding is created where the actor and the capid are identical
+                // this is a manual configuration of an actor
+                if actor == capid {
+                    let cfgvals = CapabilityConfiguration {
+                        module: actor.to_string(),
+                        values: config
+                    };
+                    let payload = serialize(&cfgvals).unwrap();
+                    self.call_actor(actor, OP_BIND_ACTOR, &payload).map(|_|())
+                } else {
+                    Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
+                        "No such capability provider: {},{}",
+                        binding, capid))))
+                }
+            },
         }
     }
 
