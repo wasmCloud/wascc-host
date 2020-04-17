@@ -43,7 +43,11 @@ pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
 
     let lock = crate::plugins::PLUGMAN.read().unwrap();
 
-    let r = lock.call(&inv).unwrap();
+    let r = match lock.call(&inv) {
+        Ok(r) => r,
+        Err(e) => InvocationResponse::error(&format!("Failed to invoke capability: {}", e)),
+    };
+
     match run_capability_post_invoke(r.clone(), &MIDDLEWARES.read().unwrap()) {
         Ok(r) => Ok(r),
         Err(e) => {

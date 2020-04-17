@@ -7,7 +7,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     host.add_actor(Actor::from_file("./examples/.assets/subscriber.wasm")?)?;
     host.add_actor(Actor::from_file("./examples/.assets/subscriber2.wasm")?)?;
     host.add_native_capability(NativeCapability::from_file(
-        "./examples/.assets/libnats_provider.so",
+        "./examples/.assets/libwascc_nats.so",
         None,
     )?)?;
 

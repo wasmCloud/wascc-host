@@ -10,7 +10,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         None,
     )?)?;
     host.add_native_capability(NativeCapability::from_file(
-        "./examples/.assets/libredis_provider.so",
+        "./examples/.assets/libwascc_redis.so",
         None,
     )?)?;
 

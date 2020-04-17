@@ -87,7 +87,7 @@ extern crate crossbeam;
 pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
 pub use capability::{CapabilitySummary, NativeCapability};
-pub use inthost::{Invocation, InvocationTarget, InvocationResponse};
+pub use inthost::{Invocation, InvocationResponse, InvocationTarget};
 
 #[cfg(feature = "manifest")]
 pub use manifest::{BindingEntry, HostManifest};
@@ -114,9 +114,15 @@ pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use crate::router::{get_route, route_exists};
 use inthost::ACTOR_BINDING;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 use wascap::jwt::{Claims, Token};
-use wascc_codec::{serialize, core::{OP_BIND_ACTOR, CapabilityConfiguration}};
+use wascc_codec::{
+    core::{CapabilityConfiguration, OP_BIND_ACTOR},
+    serialize,
+};
 
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
@@ -287,6 +293,7 @@ impl WasccHost {
                         binding, capid, e
                     ))))
                 } else {
+                    self.record_binding(actor, capid, &binding)?;
                     Ok(())
                 }
             }
@@ -296,16 +303,17 @@ impl WasccHost {
                 if actor == capid {
                     let cfgvals = CapabilityConfiguration {
                         module: actor.to_string(),
-                        values: config
+                        values: config,
                     };
                     let payload = serialize(&cfgvals).unwrap();
-                    self.call_actor(actor, OP_BIND_ACTOR, &payload).map(|_|())
+                    self.call_actor(actor, OP_BIND_ACTOR, &payload).map(|_| ())
                 } else {
                     Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                         "No such capability provider: {},{}",
-                        binding, capid))))
+                        binding, capid
+                    ))))
                 }
-            },
+            }
         }
     }
 
@@ -352,7 +360,7 @@ impl WasccHost {
             self.add_actor_gantry_first(&actor)?;
 
             #[cfg(not(feature = "gantry"))]
-            self.add_actor_from_path(&actor)?;            
+            self.add_actor_from_path(&actor)?;
         }
         for cap in manifest.capabilities {
             // for now, supports only file paths
@@ -378,7 +386,7 @@ impl WasccHost {
             self.add_actor(Actor::from_file(&actor)?)
         }
     }
-    
+
     #[cfg(not(feature = "gantry"))]
     fn add_actor_from_path(&self, actor: &str) -> Result<()> {
         self.add_actor(Actor::from_file(actor)?)
