@@ -23,6 +23,8 @@ pub(crate) const ACTOR_BINDING: &str = "__actor__"; // A marker namespace for lo
 
 lazy_static! {
     pub(crate) static ref CAPS: RwLock<Vec<CapabilitySummary>> = { RwLock::new(Vec::new()) };
+    //                                          actor,  capid, binding
+    pub(crate) static ref BINDINGS: RwLock<Vec<(String, String, String)>> = { RwLock::new(Vec::new()) };
 }
 
 #[cfg(feature = "gantry")]
@@ -84,6 +86,19 @@ impl WasccHost {
                 }
             }
         });
+        Ok(())
+    }
+
+    pub(crate) fn record_binding(&self, actor: &str, capid: &str, binding: &str) -> Result<()> {
+        let mut lock = BINDINGS.write().unwrap();
+        lock.push((actor.to_string(), capid.to_string(), binding.to_string()));
+        trace!(
+            "Actor {} successfully bound to {},{}",
+            actor,
+            binding,
+            capid
+        );
+        trace!("{}", lock.len());
         Ok(())
     }
 
@@ -256,23 +271,51 @@ fn deconfigure_actor(key: &str) {
         values: HashMap::new(),
     };
     let buf = serialize(&cfg).unwrap();
-    crate::router::ROUTER
-        .read()
-        .unwrap()
-        .all_capabilities()
-        .iter()
-        .for_each(|(target, entry)| {
-            let inv = Invocation {
-                origin: "system".to_string(),
-                msg: buf.clone(),
-                operation: OP_REMOVE_ACTOR.to_string(),
-                target: target.clone(),
-            };
-            entry.inv_s.send(inv).unwrap();
-            let _res = entry.resp_r.recv().unwrap();
-        });
+    let bindings: Vec<_> = {
+        let lock = BINDINGS.read().unwrap();
+        lock.iter()
+            .filter(|(a, _cap, _bind)| a == key)
+            .cloned()
+            .collect()
+    };
+
+    // (actor, capid, binding)
+    for (_actor, capid, binding) in bindings {
+        if let Some(route) = crate::router::ROUTER
+            .read()
+            .unwrap()
+            .get_route(&binding, &capid)
+        {
+            info!("Unbinding actor {} from {},{}", key, binding, capid);
+            let _ = route.invoke(gen_remove_actor(buf.clone(), &binding, &capid));
+            remove_binding(key, &binding, &capid);
+        } else {
+            trace!(
+                "No route for {},{} - skipping remove invocation",
+                binding,
+                capid
+            );
+        }
+    }
 }
 
+fn remove_binding(actor: &str, binding: &str, capid: &str) {
+    // binding: (actor,  capid, binding)
+    let mut lock = BINDINGS.write().unwrap();
+    lock.retain(|(a, c, b)| !(a == actor && b == binding && c == capid));
+}
+
+fn gen_remove_actor(msg: Vec<u8>, binding: &str, capid: &str) -> Invocation {
+    Invocation {
+        origin: "system".to_string(),
+        msg,
+        operation: OP_REMOVE_ACTOR.to_string(),
+        target: InvocationTarget::Capability {
+            capid: capid.to_string(),
+            binding: binding.to_string(),
+        },
+    }
+}
 /// An immutable representation of an invocation within waSCC
 #[derive(Debug, Clone)]
 pub struct Invocation {

@@ -22,11 +22,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // we could use Redis and an in-memory store or Redis and Cassandra or
     // Cassandra and etcd and so on
     host.add_native_capability(NativeCapability::from_file(
-        "./examples/.assets/libredis_provider.so",
+        "./examples/.assets/libwascc_redis.so",
         Some("source1".to_string()),
     )?)?;
     host.add_native_capability(NativeCapability::from_file(
-        "./examples/.assets/libredis_provider.so",
+        "./examples/.assets/libwascc_redis.so",
         Some("source2".to_string()),
     )?)?;
 

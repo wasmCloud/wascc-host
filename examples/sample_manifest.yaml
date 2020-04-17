@@ -3,7 +3,7 @@
 actors:
     - ./examples/.assets/kvcounter.wasm
 capabilities:
-    - path: ./examples/.assets/libredis_provider.so      
+    - path: ./examples/.assets/libwascc_redis.so      
     - path: ./examples/.assets/libwascc_httpsrv.so
 bindings:
     - actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ"

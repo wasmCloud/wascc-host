@@ -56,7 +56,7 @@ impl StdError for Error {
             ErrorKind::Authorization(_) => "Module authorization failure",
             ErrorKind::CapabilityProvider(_) => "Capability provider failure",
             ErrorKind::MiscHost(_) => "waSCC Host error",
-            ErrorKind::Plugin(_) => "Plugin error"
+            ErrorKind::Plugin(_) => "Plugin error",
         }
     }
 
