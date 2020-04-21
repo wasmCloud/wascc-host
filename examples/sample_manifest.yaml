@@ -1,4 +1,6 @@
 # This file provides the same runtime host as the kvcounter.rs sample, but in manifest form
+# To see this in action, `cargo run --example kvcounter_manifest --all-features` from the
+# wascc-host root directory
 ---
 actors:
     - ./examples/.assets/kvcounter.wasm

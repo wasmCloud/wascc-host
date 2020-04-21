@@ -65,7 +65,7 @@ impl HostManifest {
     fn expand_env(contents: &str) -> String {
         let mut options = envmnt::ExpandOptions::new();
         options.default_to_empty = false; // If environment variable not found, leave unexpanded.
-        options.expansion_type = Some(envmnt::ExpansionType::UnixBrackets); // ${VAR}
+        options.expansion_type = Some(envmnt::ExpansionType::UnixBracketsWithDefaults); // ${VAR:DEFAULT}
 
         envmnt::expand(contents, Some(options))
     }
@@ -109,12 +109,16 @@ mod test {
             "echo $TEST_EXPAND_ENV_TEMP",
             "echo ${TEST_EXPAND_ENV_TEMP}",
             "echo ${TEST_EXPAND_ENV_TMP}",
+            "echo ${TEST_EXPAND_ENV_TEMP:/etc}",
+            "echo ${TEST_EXPAND_ENV_TMP:/etc}",
         ];
         let expected = vec![
             "echo Test",
             "echo $TEST_EXPAND_ENV_TEMP",
             "echo /tmp",
             "echo ${TEST_EXPAND_ENV_TMP}",
+            "echo /tmp",
+            "echo /etc",
         ];
 
         envmnt::set("TEST_EXPAND_ENV_TEMP", "/tmp");

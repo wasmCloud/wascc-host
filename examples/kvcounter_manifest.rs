@@ -10,7 +10,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let host = WasccHost::new();
     host.apply_manifest(HostManifest::from_yaml(
         "./examples/sample_manifest.yaml",
-        false,
+        true,
     )?)?;
 
     std::thread::park();
