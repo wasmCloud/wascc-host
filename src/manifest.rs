@@ -65,7 +65,7 @@ impl HostManifest {
     fn expand_env(contents: &str) -> String {
         let mut options = envmnt::ExpandOptions::new();
         options.default_to_empty = false; // If environment variable not found, leave unexpanded.
-        options.expansion_type = Some(envmnt::ExpansionType::UnixBrackets); // ${VAR}
+        options.expansion_type = Some(envmnt::ExpansionType::UnixBracketsWithDefaults); // ${VAR}
 
         envmnt::expand(contents, Some(options))
     }
