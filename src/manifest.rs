@@ -109,12 +109,16 @@ mod test {
             "echo $TEST_EXPAND_ENV_TEMP",
             "echo ${TEST_EXPAND_ENV_TEMP}",
             "echo ${TEST_EXPAND_ENV_TMP}",
+            "echo ${TEST_EXPAND_ENV_TEMP:/etc}",
+            "echo ${TEST_EXPAND_ENV_TMP:/etc}",
         ];
         let expected = vec![
             "echo Test",
             "echo $TEST_EXPAND_ENV_TEMP",
             "echo /tmp",
             "echo ${TEST_EXPAND_ENV_TMP}",
+            "echo /tmp",
+            "echo /etc",
         ];
 
         envmnt::set("TEST_EXPAND_ENV_TEMP", "/tmp");
