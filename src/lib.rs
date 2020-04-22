@@ -136,7 +136,7 @@ pub struct WasccHost {
     caps: Arc<RwLock<Vec<CapabilitySummary>>>,
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
     #[cfg(feature = "gantry")]
-    gantry_client: Arc<RwLock<gantryclient::Client>>,
+    gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
 }
 
 impl WasccHost {
@@ -151,7 +151,7 @@ impl WasccHost {
             bindings: Arc::new(RwLock::new(vec![])),
             caps: Arc::new(RwLock::new(vec![])),
             middlewares: Arc::new(RwLock::new(vec![])),
-            gantry_client: Arc::new(RwLock::new(gantryclient::Client::default())),
+            gantry_client: Arc::new(RwLock::new(None)),
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
@@ -206,14 +206,20 @@ impl WasccHost {
     /// the signed module bytes, and adding them to the host
     #[cfg(feature = "gantry")]
     pub fn add_actor_from_gantry(&self, actor: &str) -> Result<()> {
+        {
+            let lock = self.gantry_client.read().unwrap();
+            if lock.as_ref().is_none() {
+                return Err(errors::new(errors::ErrorKind::MiscHost(
+                    "No gantry client configured".to_string()
+                )));
+            }
+        }
         use crossbeam_channel::unbounded;
         let (s, r) = unbounded();
         let bytevec = Arc::new(RwLock::new(Vec::new()));
         let b = bytevec.clone();
-        let _ack = self
-            .gantry_client
-            .read()
-            .unwrap()
+        let _ack = 
+            self.gantry_client.read().unwrap().as_ref().unwrap()            
             .download_actor(actor, move |chunk| {
                 bytevec
                     .write()
@@ -416,7 +422,7 @@ impl WasccHost {
     /// are loaded remotely via `Actor::from_gantry`
     #[cfg(feature = "gantry")]
     pub fn configure_gantry(&self, nats_urls: Vec<String>, jwt: &str, seed: &str) -> Result<()> {
-        *self.gantry_client.write().unwrap() = gantryclient::Client::new(nats_urls, jwt, seed);
+        *self.gantry_client.write().unwrap() = Some(gantryclient::Client::new(nats_urls, jwt, seed));
         Ok(())
     }
 
