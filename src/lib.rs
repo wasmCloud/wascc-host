@@ -76,9 +76,6 @@
 //!
 
 #[macro_use]
-extern crate lazy_static;
-
-#[macro_use]
 extern crate log;
 
 #[macro_use]
@@ -112,8 +109,10 @@ mod router;
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
-use crate::router::{get_route, route_exists};
+use authz::AuthHook;
 use inthost::ACTOR_BINDING;
+use plugins::PluginManager;
+use router::Router;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -124,17 +123,45 @@ use wascc_codec::{
     serialize,
 };
 
+type BindingsList = Vec<(String, String, String)>;
+
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
 pub struct WasccHost {
     claims: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>,
+    router: Arc<RwLock<Router>>,
+    plugins: Arc<RwLock<PluginManager>>,
+    auth_hook: Arc<RwLock<Option<Box<AuthHook>>>>,
+    bindings: Arc<RwLock<BindingsList>>,
+    caps: Arc<RwLock<Vec<CapabilitySummary>>>,
+    middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
+    #[cfg(feature = "gantry")]
+    gantry_client: Arc<RwLock<gantryclient::Client>>,
 }
 
 impl WasccHost {
     /// Creates a new waSCC runtime host
     pub fn new() -> Self {
+        #[cfg(feature = "gantry")]
         let host = WasccHost {
             claims: Arc::new(RwLock::new(HashMap::new())),
+            router: Arc::new(RwLock::new(Router::default())),
+            plugins: Arc::new(RwLock::new(PluginManager::default())),
+            auth_hook: Arc::new(RwLock::new(None)),
+            bindings: Arc::new(RwLock::new(vec![])),
+            caps: Arc::new(RwLock::new(vec![])),
+            middlewares: Arc::new(RwLock::new(vec![])),
+            gantry_client: Arc::new(RwLock::new(gantryclient::Client::default())),
+        };
+        #[cfg(not(feature = "gantry"))]
+        let host = WasccHost {
+            claims: Arc::new(RwLock::new(HashMap::new())),
+            router: Arc::new(RwLock::new(Router::default())),
+            plugins: Arc::new(RwLock::new(PluginManager::default())),
+            auth_hook: Arc::new(RwLock::new(None)),
+            bindings: Arc::new(RwLock::new(vec![])),
+            middlewares: Arc::new(RwLock::new(vec![])),
+            caps: Arc::new(RwLock::new(vec![])),
         };
         host.ensure_extras().unwrap();
         host
@@ -143,12 +170,25 @@ impl WasccHost {
     /// Adds an actor to the host
     pub fn add_actor(&self, actor: Actor) -> Result<()> {
         let wg = crossbeam_utils::sync::WaitGroup::new();
-        if route_exists(ACTOR_BINDING, &actor.public_key()) {
+        if self
+            .router
+            .read()
+            .unwrap()
+            .route_exists(ACTOR_BINDING, &actor.public_key())
+        {
             return Err(errors::new(errors::ErrorKind::MiscHost(format!(
                 "Actor {} is already running in this host, failed to add.",
                 actor.public_key()
             ))));
         }
+        authz::enforce_validation(&actor.token.jwt)?; // returns an `Err` if validation fails
+        if !self.check_auth(&actor.token) {
+            // invoke the auth hook, if there is one
+            return Err(errors::new(errors::ErrorKind::Authorization(
+                "Authorization hook denied access to module".into(),
+            )));
+        }
+
         info!("Adding actor {} to host", actor.public_key());
         self.spawn_actor_and_listen(
             wg.clone(),
@@ -162,6 +202,33 @@ impl WasccHost {
         Ok(())
     }
 
+    /// Adds an actor to the host by looking it up in a Gantry repository, downloading
+    /// the signed module bytes, and adding them to the host
+    #[cfg(feature = "gantry")]
+    pub fn add_actor_from_gantry(&self, actor: &str) -> Result<()> {
+        use crossbeam_channel::unbounded;
+        let (s, r) = unbounded();
+        let bytevec = Arc::new(RwLock::new(Vec::new()));
+        let b = bytevec.clone();
+        let _ack = self
+            .gantry_client
+            .read()
+            .unwrap()
+            .download_actor(actor, move |chunk| {
+                bytevec
+                    .write()
+                    .unwrap()
+                    .extend_from_slice(&chunk.chunk_bytes);
+                if chunk.sequence_no == chunk.total_chunks {
+                    s.send(true).unwrap();
+                }
+                Ok(())
+            });
+        let _ = r.recv().unwrap();
+        let vec = b.read().unwrap();
+        self.add_actor(Actor::from_bytes(vec.clone())?)
+    }
+
     /// Adds a portable capability provider (WASI actor) to the waSCC host
     pub fn add_capability(
         &self,
@@ -172,12 +239,25 @@ impl WasccHost {
         let token = authz::extract_claims(&actor.bytes)?;
         let capid = token.claims.metadata.unwrap().caps.unwrap()[0].clone();
         let binding = binding.unwrap_or("default");
-        if route_exists(&binding, &capid) {
+        if self.router.read().unwrap().route_exists(&binding, &capid) {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, 
                 binding)
             )));
         }
+        let claims = actor.token.claims.clone();
+        let summary = CapabilitySummary {
+            id: capid.clone(),
+            name: claims
+                .metadata
+                .unwrap()
+                .name
+                .unwrap_or(capid.clone())
+                .to_string(),
+            binding: binding.to_string(),
+            portable: true,
+        };
+        self.caps.write().unwrap().push(summary);
         info!("Adding portable capability to host: {},{}", binding, capid);
         let wg = crossbeam_utils::sync::WaitGroup::new();
         self.spawn_actor_and_listen(
@@ -195,7 +275,7 @@ impl WasccHost {
     /// Removes an actor from the host. Notifies the actor's processing thread to terminate,
     /// which will in turn attempt to unbind that actor from all previously bound capability providers
     pub fn remove_actor(&self, pk: &str) -> Result<()> {
-        crate::router::ROUTER
+        self.router
             .write()
             .unwrap()
             .terminate_route(crate::inthost::ACTOR_BINDING, pk)
@@ -206,12 +286,12 @@ impl WasccHost {
     /// providers (e.g. messages from subscriptions or HTTP requests) to build up in a backlog,
     /// so make sure the new actor can handle this stream of these delayed messages
     pub fn replace_actor(&self, new_actor: Actor) -> Result<()> {
-        crate::inthost::replace_actor(new_actor)
+        crate::inthost::replace_actor(self.router.clone(), new_actor)
     }
 
     /// Adds a middleware item to the middleware processing pipeline
     pub fn add_middleware(&self, mid: impl Middleware) {
-        middleware::add_middleware(mid);
+        self.middlewares.write().unwrap().push(Box::new(mid));
     }
 
     /// Setting a custom authorization hook allows your code to make additional decisions
@@ -221,14 +301,19 @@ impl WasccHost {
     where
         F: Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static,
     {
-        crate::authz::set_auth_hook(hook)
+        *self.auth_hook.write().unwrap() = Some(Box::new(hook));
     }
 
     /// Adds a native capability provider plugin to the waSCC runtime. Note that because these capabilities are native,
     /// cross-platform support is not always guaranteed.
     pub fn add_native_capability(&self, capability: NativeCapability) -> Result<()> {
         let capid = capability.capid.clone();
-        if route_exists(&capability.binding_name, &capability.id()) {
+        if self
+            .router
+            .read()
+            .unwrap()
+            .route_exists(&capability.binding_name, &capability.id())
+        {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name                
             ))));
@@ -252,7 +337,7 @@ impl WasccHost {
         binding_name: Option<String>,
     ) -> Result<()> {
         let b = binding_name.unwrap_or("default".to_string());
-        if let Some(entry) = get_route(&b, capability_id) {
+        if let Some(entry) = self.router.read().unwrap().get_route(&b, capability_id) {
             entry.terminate();
             Ok(())
         } else {
@@ -289,7 +374,7 @@ impl WasccHost {
             "Attempting to bind actor {} to {},{}",
             actor, &binding, capid
         );
-        match get_route(&binding, capid) {
+        match self.router.read().unwrap().get_route(&binding, capid) {
             Some(entry) => {
                 let res = entry.invoke(inthost::gen_config_invocation(
                     actor,
@@ -331,14 +416,14 @@ impl WasccHost {
     /// are loaded remotely via `Actor::from_gantry`
     #[cfg(feature = "gantry")]
     pub fn configure_gantry(&self, nats_urls: Vec<String>, jwt: &str, seed: &str) -> Result<()> {
-        *inthost::GANTRYCLIENT.write().unwrap() = gantryclient::Client::new(nats_urls, jwt, seed);
+        *self.gantry_client.write().unwrap() = gantryclient::Client::new(nats_urls, jwt, seed);
         Ok(())
     }
 
     /// Invoke an operation handler on an actor directly. The caller is responsible for
     /// knowing ahead of time if the given actor supports the specified operation.
     pub fn call_actor(&self, actor: &str, operation: &str, msg: &[u8]) -> Result<Vec<u8>> {
-        match get_route(ACTOR_BINDING, actor) {
+        match self.router.read().unwrap().get_route(ACTOR_BINDING, actor) {
             Some(entry) => {
                 match entry.invoke(Invocation::new(
                     "system".to_string(),
@@ -391,15 +476,10 @@ impl WasccHost {
     fn add_actor_gantry_first(&self, actor: &str) -> Result<()> {
         if actor.len() == 56 && actor.starts_with('M') {
             // This is an actor's public subject
-            self.add_actor(Actor::from_gantry(&actor)?)
+            self.add_actor_from_gantry(actor)
         } else {
             self.add_actor(Actor::from_file(&actor)?)
         }
-    }
-
-    #[cfg(not(feature = "gantry"))]
-    fn add_actor_from_path(&self, actor: &str) -> Result<()> {
-        self.add_actor(Actor::from_file(actor)?)
     }
 
     /// Returns the list of actors registered in the host
@@ -409,7 +489,7 @@ impl WasccHost {
 
     /// Returns the list of capability providers registered in the host
     pub fn capabilities(&self) -> Vec<CapabilitySummary> {
-        let lock = inthost::CAPS.read().unwrap();
+        let lock = self.caps.read().unwrap();
         lock.iter().cloned().collect()
     }
 }

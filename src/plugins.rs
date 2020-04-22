@@ -18,15 +18,11 @@ use crate::errors::{self, ErrorKind};
 use crate::inthost::Invocation;
 use crate::inthost::{InvocationResponse, InvocationTarget};
 use crate::{
-    router::{get_route, route_key, RouteKey},
+    router::{route_key, RouteKey, Router},
     Result,
 };
 use std::collections::HashMap;
-use std::sync::RwLock;
-
-lazy_static! {
-    pub(crate) static ref PLUGMAN: RwLock<PluginManager> = { RwLock::new(PluginManager::new()) };
-}
+use std::sync::{Arc, RwLock};
 
 #[derive(Default)]
 pub(crate) struct PluginManager {
@@ -58,7 +54,11 @@ impl PluginManager {
         }
     }
 
-    pub fn call(&self, inv: &Invocation) -> Result<InvocationResponse> {
+    pub fn call(
+        &self,
+        router: Arc<RwLock<Router>>,
+        inv: &Invocation,
+    ) -> Result<InvocationResponse> {
         if let InvocationTarget::Capability { capid, binding } = &inv.target {
             let route_key = route_key(&binding, &capid);
             match self.plugins.get(&route_key) {
@@ -69,7 +69,7 @@ impl PluginManager {
                 },
                 // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
                 None => {
-                    if let Some(entry) = get_route(&binding, &capid) {
+                    if let Some(entry) = router.read().unwrap().get_route(&binding, &capid) {
                         entry.invoke(inv.clone())
                     } else {
                         Err(errors::new(ErrorKind::CapabilityProvider(format!(
@@ -106,8 +106,4 @@ impl PluginManager {
         }
         Ok(())
     }
-}
-
-pub(crate) fn remove_plugin(binding: &str, capid: &str) -> Result<()> {
-    PLUGMAN.write().unwrap().remove_plugin(binding, capid)
 }

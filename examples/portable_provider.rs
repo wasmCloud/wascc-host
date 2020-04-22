@@ -30,6 +30,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         generate_port_config(8081),
     )?;
 
+    for cap in host.capabilities() {
+        println!("Loaded cap: {} - {}", cap.name, cap.id);
+    }
+    for (actor, _claims) in host.actors() {
+        println!("Loaded actor: {}", actor);
+    }
+
     std::thread::park();
 
     Ok(())

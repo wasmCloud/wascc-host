@@ -13,28 +13,15 @@
 // limitations under the License.
 
 use crate::errors;
-use crate::Result;
+use crate::{Result, WasccHost};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 use wascap::jwt::Token;
 use wascap::prelude::*;
 
-lazy_static! {
-    static ref AUTH_HOOK: RwLock<Option<Box<AuthHook>>> = RwLock::new(None);
-}
-
 pub(crate) type ClaimsMap = Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>;
-
-type AuthHook = dyn Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static;
-
-#[allow(dead_code)]
-pub(crate) fn set_auth_hook<F>(hook: F)
-where
-    F: Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static,
-{
-    *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
-}
+pub(crate) type AuthHook = dyn Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static;
 
 pub(crate) fn get_all_claims(map: ClaimsMap) -> Vec<(String, Claims<wascap::jwt::Actor>)> {
     map.read()
@@ -42,14 +29,6 @@ pub(crate) fn get_all_claims(map: ClaimsMap) -> Vec<(String, Claims<wascap::jwt:
         .iter()
         .map(|(pk, claims)| (pk.clone(), claims.clone()))
         .collect()
-}
-
-pub(crate) fn check_auth(token: &Token<wascap::jwt::Actor>) -> bool {
-    let lock = AUTH_HOOK.read().unwrap();
-    match *lock {
-        Some(ref f) => f(token),
-        None => true,
-    }
 }
 
 pub(crate) fn can_invoke(claims: &Claims<wascap::jwt::Actor>, capability_id: &str) -> bool {
@@ -72,14 +51,6 @@ pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token<wascap::jw
     let token = wascap::wasm::extract_claims(buf)?;
     match token {
         Some(token) => {
-            enforce_validation(&token.jwt)?; // returns an `Err` if validation fails
-            if !check_auth(&token) {
-                // invoke the auth hook, if there is one
-                return Err(errors::new(errors::ErrorKind::Authorization(
-                    "Authorization hook denied access to module".into(),
-                )));
-            }
-
             info!(
                 "Discovered capability attestations: {}",
                 token
@@ -100,7 +71,7 @@ pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token<wascap::jw
     }
 }
 
-fn enforce_validation(jwt: &str) -> Result<()> {
+pub(crate) fn enforce_validation(jwt: &str) -> Result<()> {
     let v = validate_token::<wascap::jwt::Actor>(jwt)?;
     if v.expired {
         Err(errors::new(errors::ErrorKind::Authorization(
@@ -129,4 +100,14 @@ pub(crate) fn register_claims(
 
 pub(crate) fn unregister_claims(claims_map: ClaimsMap, subject: &str) {
     claims_map.write().unwrap().remove(subject);
+}
+
+impl WasccHost {
+    pub(crate) fn check_auth(&self, token: &Token<wascap::jwt::Actor>) -> bool {
+        let lock = self.auth_hook.read().unwrap();
+        match *lock {
+            Some(ref f) => f(token),
+            None => true,
+        }
+    }
 }
