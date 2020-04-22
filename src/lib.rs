@@ -126,12 +126,16 @@ use wascc_codec::{
 
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
-pub struct WasccHost {}
+pub struct WasccHost {
+    claims: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>,
+}
 
 impl WasccHost {
     /// Creates a new waSCC runtime host
     pub fn new() -> Self {
-        let host = WasccHost {};
+        let host = WasccHost {
+            claims: Arc::new(RwLock::new(HashMap::new())),
+        };
         host.ensure_extras().unwrap();
         host
     }
@@ -268,7 +272,13 @@ impl WasccHost {
         binding_name: Option<String>,
         config: HashMap<String, String>,
     ) -> Result<()> {
-        if !authz::can_invoke(actor, capid) {
+        let claims = self.claims.read().unwrap().get(actor).cloned();
+        if claims.is_none() {
+            return Err(errors::new(errors::ErrorKind::MiscHost(
+                "Attempted to bind non-existent actor".to_string(),
+            )));
+        }
+        if !authz::can_invoke(&claims.unwrap(), capid) {
             return Err(errors::new(errors::ErrorKind::Authorization(format!(
                 "Unauthorized binding: actor {} is not authorized to use capability {}.",
                 actor, capid
@@ -348,7 +358,7 @@ impl WasccHost {
 
     /// Returns the full set of JWT claims for a given actor, if that actor is running in the host
     pub fn claims_for_actor(&self, pk: &str) -> Option<Claims<wascap::jwt::Actor>> {
-        authz::get_claims(pk)
+        self.claims.read().unwrap().get(pk).cloned()
     }
 
     /// Applies a manifest JSON or YAML file to set up a host's actors, capability providers,
@@ -394,7 +404,7 @@ impl WasccHost {
 
     /// Returns the list of actors registered in the host
     pub fn actors(&self) -> Vec<SubjectClaimsPair> {
-        authz::get_all_claims()
+        authz::get_all_claims(self.claims.clone())
     }
 
     /// Returns the list of capability providers registered in the host

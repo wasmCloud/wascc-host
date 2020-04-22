@@ -45,18 +45,30 @@ impl WasccHost {
         actor: bool,
         binding: String,
     ) -> Result<()> {
+        let claims_map = self.claims.clone();
+        let map2 = claims_map.clone();
+        let claims = claims.clone();
+        let c2 = claims.clone();
         thread::spawn(move || {
             info!(
                 "Loading {} module...",
                 if actor { "actor" } else { "capability" }
             );
-            let mut guest = WapcHost::new(host_callback, &buf, wasi).unwrap();
-            authz::register_claims(guest.id(), claims.clone());
+            authz::register_claims(claims_map, &claims.subject, claims.clone());
+            let route_key = route_key(&claims);
+            let mut guest = WapcHost::new(
+                move |id, bd, ns, op, payload| {
+                    host_callback(claims.clone(), bd, ns, op, payload)
+                },
+                &buf,
+                wasi,
+            )
+            .unwrap();
             let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
             let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
                 channel::unbounded();
             let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
-            let route_key = route_key(&claims);
+
             if actor {
                 router::register_route(ACTOR_BINDING, &route_key, inv_s, resp_r, term_s);
             } else {
@@ -80,7 +92,7 @@ impl WasccHost {
                     recv(term_r) -> _term => {
                         info!("Terminating {} {}", if actor { "actor" } else { "capability" }, route_key);
                         deconfigure_actor(&route_key);
-                        authz::unregister_claims(guest.id());
+                        authz::unregister_claims(map2, &c2.subject);
                         break;
                     }
                 }
@@ -130,6 +142,7 @@ impl WasccHost {
 
         let capid = capability.id().to_string();
         let binding = capability.binding_name.to_string();
+        let claims_map = self.claims.clone();
 
         crate::plugins::PLUGMAN
             .write()
@@ -166,10 +179,11 @@ impl WasccHost {
                                     middleware::invoke_capability(inv.clone()).unwrap()
                                 },
                                 InvocationTarget::Actor(tgt_actor) => {
-                                    if !authz::can_invoke(&tgt_actor, &capid) {
+                                    let tgt_claims = claims_map.read().unwrap().get(tgt_actor).cloned().unwrap();
+                                    if !authz::can_invoke(&tgt_claims, &capid) {
                                         InvocationResponse::error(&format!(
                                             "Dispatch between actor and unauthorized capability: {} <-> {}",
-                                            tgt_actor, capid
+                                            tgt_claims.subject, capid
                                         ))
                                     } else {
                                         match get_route(ACTOR_BINDING, &tgt_actor) {
@@ -371,22 +385,22 @@ impl InvocationResponse {
 /// NOTE: if the target namespace of the invocation is an actor subject (e.g. "M...") then the invocation target will be for an actor,
 /// not a capability (this is what enables actor-to-actor comms)
 fn host_callback(
-    id: u64,
+    claims: Claims<wascap::jwt::Actor>,    
     bd: &str,
     ns: &str,
     op: &str,
     payload: &[u8],
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    trace!("Guest {} invoking {}:{}", id, ns, op);
+    trace!("Guest {} invoking {}:{}", claims.subject, ns, op);
 
     let capability_id = ns;
-    let inv = invocation_from_callback(id, bd, ns, op, payload);
+    let inv = invocation_from_callback(&claims.subject, bd, ns, op, payload);
 
-    if !authz::can_id_invoke(id, capability_id) {
+    if !authz::can_invoke(&claims, capability_id) {
         return Err(Box::new(errors::new(errors::ErrorKind::Authorization(
             format!(
                 "Actor {} does not have permission to communicate with {}",
-                id, capability_id
+                claims.subject, capability_id
             ),
         ))));
     }
@@ -415,7 +429,13 @@ fn host_callback(
     }
 }
 
-fn invocation_from_callback(id: u64, bd: &str, ns: &str, op: &str, payload: &[u8]) -> Invocation {
+fn invocation_from_callback(
+    origin: &str,
+    bd: &str,
+    ns: &str,
+    op: &str,
+    payload: &[u8],
+) -> Invocation {
     let binding = if bd.trim().is_empty() {
         // Some actor SDKs may not specify a binding field by default
         "default".to_string()
@@ -433,7 +453,7 @@ fn invocation_from_callback(id: u64, bd: &str, ns: &str, op: &str, payload: &[u8
     Invocation {
         msg: payload.to_vec(),
         operation: op.to_string(),
-        origin: authz::pk_for_id(id),
+        origin: origin.to_string(),
         target,
     }
 }

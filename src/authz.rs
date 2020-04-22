@@ -21,12 +21,10 @@ use wascap::jwt::Token;
 use wascap::prelude::*;
 
 lazy_static! {
-    pub(crate) static ref CLAIMS: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>> =
-        { Arc::new(RwLock::new(HashMap::new())) };
-    pub(crate) static ref WAPC_GUEST_MAP: Arc<RwLock<HashMap<u64, String>>> =
-        { Arc::new(RwLock::new(HashMap::new())) };
     static ref AUTH_HOOK: RwLock<Option<Box<AuthHook>>> = RwLock::new(None);
 }
+
+pub(crate) type ClaimsMap = Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>;
 
 type AuthHook = dyn Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static;
 
@@ -38,9 +36,8 @@ where
     *AUTH_HOOK.write().unwrap() = Some(Box::new(hook))
 }
 
-pub(crate) fn get_all_claims() -> Vec<(String, Claims<wascap::jwt::Actor>)> {
-    CLAIMS
-        .read()
+pub(crate) fn get_all_claims(map: ClaimsMap) -> Vec<(String, Claims<wascap::jwt::Actor>)> {
+    map.read()
         .unwrap()
         .iter()
         .map(|(pk, claims)| (pk.clone(), claims.clone()))
@@ -55,39 +52,19 @@ pub(crate) fn check_auth(token: &Token<wascap::jwt::Actor>) -> bool {
     }
 }
 
-pub(crate) fn can_id_invoke(id: u64, capability_id: &str) -> bool {
-    WAPC_GUEST_MAP
-        .read()
-        .unwrap()
-        .get(&id)
-        .map_or(false, |pk| can_invoke(pk, capability_id))
-}
-
-pub(crate) fn pk_for_id(id: u64) -> String {
-    WAPC_GUEST_MAP
-        .read()
-        .unwrap()
-        .get(&id)
-        .map_or(format!("actor:{}", id), |s| s.clone())
-}
-
-pub(crate) fn can_invoke(pk: &str, capability_id: &str) -> bool {
-    if pk == capability_id {
+pub(crate) fn can_invoke(claims: &Claims<wascap::jwt::Actor>, capability_id: &str) -> bool {
+    // Edge case - deliver configuration to an actor directly,
+    // so "self invocation" needs to be authorized
+    if claims.subject == capability_id {
         return true;
     }
-    CLAIMS.read().unwrap().get(pk).map_or(false, |claims| {
-        claims
-            .metadata
-            .as_ref()
-            .unwrap()
-            .caps
-            .as_ref()
-            .map_or(false, |caps| caps.contains(&capability_id.to_string()))
-    })
-}
-
-pub(crate) fn get_claims(pk: &str) -> Option<Claims<wascap::jwt::Actor>> {
-    CLAIMS.read().unwrap().get(pk).cloned()
+    claims
+        .metadata
+        .as_ref()
+        .unwrap()
+        .caps
+        .as_ref()
+        .map_or(false, |caps| caps.contains(&capability_id.to_string()))
 }
 
 // Extract claims from the JWT embedded in the wasm module's custom section
@@ -139,21 +116,17 @@ fn enforce_validation(jwt: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn register_claims(guest_id: u64, claims: Claims<wascap::jwt::Actor>) {
-    WAPC_GUEST_MAP
+pub(crate) fn register_claims(
+    claims_map: ClaimsMap,
+    subject: &str,
+    claims: Claims<wascap::jwt::Actor>,
+) {
+    claims_map
         .write()
         .unwrap()
-        .insert(guest_id, claims.subject.clone());
-
-    CLAIMS
-        .write()
-        .unwrap()
-        .insert(claims.subject.clone(), claims);
+        .insert(subject.to_string(), claims);
 }
 
-pub(crate) fn unregister_claims(guest_id: u64) {
-    let pk = pk_for_id(guest_id);
-
-    CLAIMS.write().unwrap().remove(&pk);
-    WAPC_GUEST_MAP.write().unwrap().remove(&guest_id);
+pub(crate) fn unregister_claims(claims_map: ClaimsMap, subject: &str) {
+    claims_map.write().unwrap().remove(subject);
 }
