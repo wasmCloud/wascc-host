@@ -17,3 +17,7 @@ jobs:
       run: cargo build --verbose --all-features
     - name: Run tests
       run: cargo test --verbose --all-features
+    - name: Run tests (manifest only)
+      run: cargo test --verbose --features "manifest"
+    - name: Run tests (gantry only)
+      run: cargo test --verbose --features "gantry"

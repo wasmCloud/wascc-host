@@ -461,7 +461,7 @@ impl WasccHost {
             self.add_actor_gantry_first(&actor)?;
 
             #[cfg(not(feature = "gantry"))]
-            self.add_actor_from_path(&actor)?;
+            self.add_actor(Actor::from_file(&actor)?)?;
         }
         for cap in manifest.capabilities {
             // for now, supports only file paths
