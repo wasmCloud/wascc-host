@@ -44,34 +44,6 @@ impl Actor {
         Actor::from_bytes(buf)
     }
 
-    /// Create an actor by looking it up in a Gantry repository and downloading
-    /// the signed module bytes
-    #[cfg(feature = "gantry")]
-    pub fn from_gantry(actor: &str) -> Result<Actor> {
-        use crossbeam_channel::unbounded;
-        use std::sync::{Arc, RwLock};
-        let (s, r) = unbounded();
-        let bytevec = Arc::new(RwLock::new(Vec::new()));
-        let b = bytevec.clone();
-        let _ack =
-            crate::inthost::GANTRYCLIENT
-                .read()
-                .unwrap()
-                .download_actor(actor, move |chunk| {
-                    bytevec
-                        .write()
-                        .unwrap()
-                        .extend_from_slice(&chunk.chunk_bytes);
-                    if chunk.sequence_no == chunk.total_chunks {
-                        s.send(true).unwrap();
-                    }
-                    Ok(())
-                });
-        let _ = r.recv().unwrap();
-        let vec = b.read().unwrap();
-        Actor::from_bytes(vec.clone())
-    }
-
     /// Obtain the actor's public key (The `sub` field of a JWT). This can be treated as a globally unique identifier
     pub fn public_key(&self) -> String {
         self.token.claims.subject.to_string()

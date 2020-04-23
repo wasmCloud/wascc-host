@@ -13,15 +13,10 @@
 // limitations under the License.
 
 use crate::Result;
-use crate::{Invocation, InvocationResponse};
+use crate::{plugins::PluginManager, router::Router, Invocation, InvocationResponse};
 use std::sync::Arc;
 use std::sync::RwLock;
 use wapc::WapcHost;
-
-lazy_static! {
-    pub(crate) static ref MIDDLEWARES: Arc<RwLock<Vec<Box<dyn Middleware>>>> =
-        { Arc::new(RwLock::new(Vec::new())) };
-}
 
 /// The trait that must be implemented by all waSCC middleware
 pub trait Middleware: Send + Sync + 'static {
@@ -31,8 +26,13 @@ pub trait Middleware: Send + Sync + 'static {
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
 }
 
-pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
-    let mw = &MIDDLEWARES.read().unwrap();
+pub(crate) fn invoke_capability(
+    middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
+    plugins: Arc<RwLock<PluginManager>>,
+    router: Arc<RwLock<Router>>,
+    inv: Invocation,
+) -> Result<InvocationResponse> {
+    let mw = &middlewares.read().unwrap();
     let inv = match run_capability_pre_invoke(inv.clone(), mw) {
         Ok(i) => i,
         Err(e) => {
@@ -41,14 +41,14 @@ pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
         }
     };
 
-    let lock = crate::plugins::PLUGMAN.read().unwrap();
+    let lock = plugins.read().unwrap();
 
-    let r = match lock.call(&inv) {
+    let r = match lock.call(router, &inv) {
         Ok(r) => r,
         Err(e) => InvocationResponse::error(&format!("Failed to invoke capability: {}", e)),
     };
 
-    match run_capability_post_invoke(r.clone(), &MIDDLEWARES.read().unwrap()) {
+    match run_capability_post_invoke(r.clone(), &middlewares.read().unwrap()) {
         Ok(r) => Ok(r),
         Err(e) => {
             error!("Middleware failure: {}", e);
@@ -57,8 +57,12 @@ pub(crate) fn invoke_capability(inv: Invocation) -> Result<InvocationResponse> {
     }
 }
 
-pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<InvocationResponse> {
-    let mw = &MIDDLEWARES.read().unwrap();
+pub(crate) fn invoke_actor(
+    middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
+    inv: Invocation,
+    guest: &mut WapcHost,
+) -> Result<InvocationResponse> {
+    let mw = &middlewares.read().unwrap();
     let inv = match run_actor_pre_invoke(inv.clone(), mw) {
         Ok(i) => i,
         Err(e) => {
@@ -71,17 +75,14 @@ pub(crate) fn invoke_actor(inv: Invocation, guest: &mut WapcHost) -> Result<Invo
         Ok(v) => InvocationResponse::success(v),
         Err(e) => InvocationResponse::error(&format!("Failed to invoke guest call: {}", e)),
     };
-    match run_actor_post_invoke(inv_r.clone(), &MIDDLEWARES.read().unwrap()) {
+    let lock = middlewares.read().unwrap();
+    match run_actor_post_invoke(inv_r.clone(), &lock) {
         Ok(r) => Ok(r),
         Err(e) => {
             error!("Middleware failure: {}", e);
             Ok(inv_r)
         }
     }
-}
-
-pub(crate) fn add_middleware(md: impl Middleware) {
-    MIDDLEWARES.write().unwrap().push(Box::new(md))
 }
 
 fn run_actor_pre_invoke(
@@ -144,13 +145,6 @@ pub(crate) fn run_capability_post_invoke(
 mod test {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    lazy_static! {
-        pub static ref PRE: AtomicUsize = { AtomicUsize::new(0) };
-        pub static ref POST: AtomicUsize = { AtomicUsize::new(0) };
-        pub static ref CAP_PRE: AtomicUsize = { AtomicUsize::new(0) };
-        pub static ref CAP_POST: AtomicUsize = { AtomicUsize::new(0) };
-    }
-
     use super::Middleware;
     use crate::inthost::Invocation;
     use crate::inthost::{InvocationResponse, InvocationTarget};
@@ -184,6 +178,11 @@ mod test {
             Ok(response)
         }
     }
+
+    static PRE: AtomicUsize = AtomicUsize::new(0);
+    static POST: AtomicUsize = AtomicUsize::new(0);
+    static CAP_PRE: AtomicUsize = AtomicUsize::new(0);
+    static CAP_POST: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
     fn simple_add() {

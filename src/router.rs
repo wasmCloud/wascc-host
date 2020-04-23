@@ -25,11 +25,6 @@ pub(crate) struct Router {
     routes: HashMap<RouteKey, RouteEntry>,
 }
 
-lazy_static! {
-    pub(crate) static ref ROUTER: Arc<RwLock<Router>> =
-        { Arc::new(RwLock::new(Router::default())) };
-}
-
 #[derive(Clone)]
 pub(crate) struct RouteEntry {
     pub inv_s: Sender<Invocation>,
@@ -128,29 +123,4 @@ fn captarget_for_key(key: RouteKey) -> InvocationTarget {
 
 pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
     (binding.to_string(), id.to_string())
-}
-
-pub(crate) fn route_exists(binding: &str, id: &str) -> bool {
-    ROUTER.read().unwrap().route_exists(binding, id)
-}
-
-pub(crate) fn get_route(binding: &str, id: &str) -> Option<RouteEntry> {
-    ROUTER.read().unwrap().get_route(binding, id)
-}
-
-pub(crate) fn remove_route(binding: &str, id: &str) {
-    ROUTER.write().unwrap().remove_route(binding, id);
-}
-
-pub(crate) fn register_route(
-    binding: &str,
-    route_key: &str,
-    inv_s: Sender<Invocation>,
-    resp_r: Receiver<InvocationResponse>,
-    term_s: Sender<bool>,
-) {
-    ROUTER
-        .write()
-        .unwrap()
-        .add_route(binding, route_key, inv_s, resp_r, term_s);
 }
