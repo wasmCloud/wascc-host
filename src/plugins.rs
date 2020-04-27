@@ -30,10 +30,6 @@ pub(crate) struct PluginManager {
 }
 
 impl PluginManager {
-    pub fn new() -> PluginManager {
-        Self::default()
-    }
-
     pub fn register_dispatcher(
         &mut self,
         binding: &str,

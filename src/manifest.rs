@@ -21,7 +21,7 @@ pub struct BindingEntry {
     pub actor: String,
     pub capability: String,
     pub binding: Option<String>,
-    pub values: HashMap<String, String>,
+    pub values: Option<HashMap<String, String>>,
 }
 
 #[cfg(feature = "manifest")]
@@ -95,7 +95,7 @@ mod test {
                 actor: "a".to_string(),
                 binding: Some("default".to_string()),
                 capability: "wascc:one".to_string(),
-                values: gen_values(),
+                values: Some(gen_values()),
             }],
         };
         let yaml = serde_yaml::to_string(&manifest).unwrap();

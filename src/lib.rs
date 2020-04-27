@@ -1,5 +1,5 @@
 #![doc(html_logo_url = "https://avatars0.githubusercontent.com/u/52050279?s=200&v=4")]
-// Copyright 2015-2019 Capital One Services, LLC
+// Copyright 2015-2020 Capital One Services, LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -210,7 +210,7 @@ impl WasccHost {
             let lock = self.gantry_client.read().unwrap();
             if lock.as_ref().is_none() {
                 return Err(errors::new(errors::ErrorKind::MiscHost(
-                    "No gantry client configured".to_string()
+                    "No gantry client configured".to_string(),
                 )));
             }
         }
@@ -218,8 +218,12 @@ impl WasccHost {
         let (s, r) = unbounded();
         let bytevec = Arc::new(RwLock::new(Vec::new()));
         let b = bytevec.clone();
-        let _ack = 
-            self.gantry_client.read().unwrap().as_ref().unwrap()            
+        let _ack = self
+            .gantry_client
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
             .download_actor(actor, move |chunk| {
                 bytevec
                     .write()
@@ -422,7 +426,8 @@ impl WasccHost {
     /// are loaded remotely via `Actor::from_gantry`
     #[cfg(feature = "gantry")]
     pub fn configure_gantry(&self, nats_urls: Vec<String>, jwt: &str, seed: &str) -> Result<()> {
-        *self.gantry_client.write().unwrap() = Some(gantryclient::Client::new(nats_urls, jwt, seed));
+        *self.gantry_client.write().unwrap() =
+            Some(gantryclient::Client::new(nats_urls, jwt, seed));
         Ok(())
     }
 
@@ -472,7 +477,7 @@ impl WasccHost {
                 &config.actor,
                 &config.capability,
                 config.binding,
-                config.values,
+                config.values.unwrap_or(HashMap::new()),
             )?;
         }
         Ok(())

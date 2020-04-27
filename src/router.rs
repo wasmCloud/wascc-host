@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::inthost::{Invocation, InvocationResponse, InvocationTarget};
+use crate::inthost::{Invocation, InvocationResponse};
 use crate::{errors, Result};
 use crossbeam::{Receiver, Sender};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 pub(crate) type RouteKey = (String, String); // (binding, id)
 
@@ -97,28 +96,7 @@ impl Router {
                 key
             ))))
         }
-    }
-
-    pub fn all_capabilities(&self) -> Vec<(InvocationTarget, RouteEntry)> {
-        // Return all routes that aren't actors
-        self.routes
-            .iter()
-            .filter_map(|(key, pair)| {
-                if key.0 == crate::inthost::ACTOR_BINDING {
-                    None
-                } else {
-                    Some((captarget_for_key(key.clone()), pair.clone()))
-                }
-            })
-            .collect()
-    }
-}
-
-fn captarget_for_key(key: RouteKey) -> InvocationTarget {
-    InvocationTarget::Capability {
-        binding: key.0.to_string(),
-        capid: key.1.to_string(),
-    }
+    }    
 }
 
 pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
