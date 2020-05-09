@@ -105,6 +105,7 @@ mod manifest;
 
 mod middleware;
 mod plugins;
+mod prometheus_middleware;
 mod router;
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
