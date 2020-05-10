@@ -24,7 +24,7 @@ libloading = "0.6.1"
 crossbeam-channel = "0.4.2"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
-prometheus = "0.8"
+prometheus = { version = "0.8", features = ["push"] }
 hyper = "0.13"
 tokio = "0.2"
 wapc = "0.7.0"

@@ -3,66 +3,85 @@ use crate::{InvocationTarget, Result};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server};
-use prometheus::core::{AtomicU64, GenericCounter};
-use prometheus::{Encoder, Opts, Registry, TextEncoder};
-use std::collections::hash_map::Entry;
+use prometheus::core::{AtomicI64, GenericCounter};
+use prometheus::{labels, register_int_counter, Encoder, Opts, TextEncoder};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 struct PrometheusMiddleware {
     metrics: Arc<RwLock<Metrics>>,
-    registry: Arc<RwLock<Registry>>,
     metrics_server_handle: Option<JoinHandle<std::result::Result<(), tokio::task::JoinError>>>,
     metrics_server_kill_switch: Option<tokio::sync::oneshot::Sender<()>>,
+    // metrics_push_handle: Option<JoinHandle<std::result::Result<(), tokio::task::JoinError>>>,
 }
 
 struct Metrics {
-    cap_total_call_count: GenericCounter<AtomicU64>,
-    cap_call_count: HashMap<String, GenericCounter<AtomicU64>>,
-    cap_total_call_time: GenericCounter<AtomicU64>,
-    cap_call_time: HashMap<String, GenericCounter<AtomicU64>>,
-    actor_total_call_count: GenericCounter<AtomicU64>,
-    actor_call_count: HashMap<String, GenericCounter<AtomicU64>>,
-    actor_total_call_time: GenericCounter<AtomicU64>,
-    actor_call_time: HashMap<String, GenericCounter<AtomicU64>>,
+    cap_total_call_count: GenericCounter<AtomicI64>,
+    cap_call_count: HashMap<String, GenericCounter<AtomicI64>>,
+    cap_total_call_time: GenericCounter<AtomicI64>,
+    cap_call_time: HashMap<String, GenericCounter<AtomicI64>>,
+    actor_total_call_count: GenericCounter<AtomicI64>,
+    actor_call_count: HashMap<String, GenericCounter<AtomicI64>>,
+    actor_total_call_time: GenericCounter<AtomicI64>,
+    actor_call_time: HashMap<String, GenericCounter<AtomicI64>>,
 }
 
 impl PrometheusMiddleware {
-    fn new(server_addr: SocketAddr) -> Self
+    fn new(prometheus_addr: Option<SocketAddr>, pushgateway_addr: Option<String>) -> Self
     where
         Self: Send + Sync,
     {
         let metrics = PrometheusMiddleware::init_metrics();
-        let registry = PrometheusMiddleware::init_registry(&metrics);
-
+        PrometheusMiddleware::init_registry(&metrics);
         let metrics = Arc::new(RwLock::new(metrics));
-        let registry = Arc::new(RwLock::new(registry));
-        let registry_for_server = registry.clone();
 
-        let (kill_switch_sender, kill_switch_receiver) = tokio::sync::oneshot::channel();
+        // TODO Can we reuse the same thread?
+        let (metrics_server_handle, metrics_server_kill_switch) =
+            if let Some(addr) = prometheus_addr {
+                let (kill_switch_sender, kill_switch_receiver) = tokio::sync::oneshot::channel();
 
-        let metrics_server_handle = std::thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-            let server_task = rt.spawn(serve_metrics(
-                server_addr,
-                kill_switch_receiver,
-                registry_for_server,
-            ));
-            rt.block_on(server_task)
-        });
+                let metrics_server_handle = std::thread::spawn(move || {
+                    let mut rt =
+                        tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+                    let server_task = rt.spawn(serve_metrics(addr, kill_switch_receiver));
+                    // let _c = rt.spawn(async move {
+                    //     let addr = pushgateway_addr.clone();
+                    //
+                    //     loop {
+                    //         push_metrics(&addr.clone().unwrap());
+                    //         // tokio::time::delay_for(Duration::from_secs(1)).await;
+                    //     }
+                    // });
+                    rt.block_on(server_task)
+                    // rt.block_on(_c)
+                });
+
+                (Some(metrics_server_handle), Some(kill_switch_sender))
+            } else {
+                (None, None)
+            };
+
+        // let metrics_push_handle = if let Some(addr) = pushgateway_addr {
+        //     let metrics_push_handle = std::thread::spawn(move || {
+        //         push_metrics();
+        //     });
+        //
+        //     metrics_push_handle
+        // };
 
         Self {
             metrics,
-            registry,
-            metrics_server_handle: Some(metrics_server_handle),
-            metrics_server_kill_switch: Some(kill_switch_sender),
+            metrics_server_handle,
+            metrics_server_kill_switch,
+            // metrics_push_handle,
         }
     }
 
-    fn init_registry(metrics: &Metrics) -> Registry {
-        let registry = Registry::new();
+    fn init_registry(metrics: &Metrics) {
+        let registry = prometheus::default_registry();
         registry
             .register(Box::new(metrics.cap_total_call_count.clone()))
             .expect("Failed to register counter 'cap_total_call_count'");
@@ -75,7 +94,6 @@ impl PrometheusMiddleware {
         registry
             .register(Box::new(metrics.actor_total_call_time.clone()))
             .expect("Failed to register counter 'actor_total_call_time'");
-        registry
     }
 
     fn init_metrics() -> Metrics {
@@ -111,7 +129,7 @@ impl PrometheusMiddleware {
 // TODO Add timing of invocations
 impl Middleware for PrometheusMiddleware {
     fn actor_pre_invoke(&self, inv: Invocation) -> Result<Invocation> {
-        pre_invoke(&self.registry, &self.metrics, inv)
+        pre_invoke(&self.metrics, inv)
     }
 
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
@@ -119,7 +137,7 @@ impl Middleware for PrometheusMiddleware {
     }
 
     fn capability_pre_invoke(&self, inv: Invocation) -> Result<Invocation> {
-        pre_invoke(&self.registry, &self.metrics, inv)
+        pre_invoke(&self.metrics, inv)
     }
 
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
@@ -127,11 +145,7 @@ impl Middleware for PrometheusMiddleware {
     }
 }
 
-fn pre_invoke(
-    registry: &Arc<RwLock<Registry>>,
-    metrics: &Arc<RwLock<Metrics>>,
-    inv: Invocation,
-) -> Result<Invocation> {
+fn pre_invoke(metrics: &Arc<RwLock<Metrics>>, inv: Invocation) -> Result<Invocation> {
     let mut metrics = metrics.write().unwrap();
     let target = match &inv.target {
         InvocationTarget::Actor(actor) => actor.clone(),
@@ -144,14 +158,14 @@ fn pre_invoke(
             metrics.actor_total_call_count.inc();
             metrics
                 .actor_call_count
-                .entry(key.clone())
+                .entry(key)
                 .and_modify(|e| e.inc())
                 .or_insert_with(|| {
-                    let counter = register_counter(
-                        registry,
+                    let counter = register_int_counter!(
                         format!("{}_call_count", &actor),
-                        format!("number of invocations of {}", &actor),
-                    );
+                        format!("number of invocations of {}", &actor)
+                    )
+                    .unwrap();
                     counter.inc();
                     counter
                 });
@@ -160,17 +174,17 @@ fn pre_invoke(
             metrics.cap_total_call_count.inc();
             metrics
                 .cap_call_count
-                .entry(key.clone())
+                .entry(key)
                 .and_modify(|e| e.inc())
                 .or_insert_with(|| {
-                    let counter = register_counter(
-                        registry,
+                    let counter = register_int_counter!(
                         format!("{}_{}_call_count", &capid, &binding),
                         format!(
                             "number of invocations of capability {} with binding {}",
                             &capid, &binding
-                        ),
-                    );
+                        )
+                    )
+                    .unwrap();
                     counter.inc();
                     counter
                 });
@@ -178,20 +192,6 @@ fn pre_invoke(
     }
 
     Ok(inv)
-}
-
-fn register_counter(
-    registry: &Arc<RwLock<Registry>>,
-    counter_name: String,
-    counter_help: String,
-) -> GenericCounter<AtomicU64> {
-    let counter = GenericCounter::with_opts(Opts::new(counter_name.clone(), counter_help)).unwrap();
-    registry
-        .read()
-        .unwrap()
-        .register(Box::new(counter.clone()))
-        .expect(&format!("Unable to register counter '{}'", counter_name));
-    counter
 }
 
 impl Drop for PrometheusMiddleware {
@@ -208,13 +208,10 @@ impl Drop for PrometheusMiddleware {
     }
 }
 
-async fn serve_request(
-    req: Request<Body>,
-    registry: Arc<RwLock<Registry>>,
-) -> hyper::error::Result<Response<Body>> {
+async fn serve_request(req: Request<Body>) -> hyper::error::Result<Response<Body>> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
-            let metric_families = registry.read().unwrap().gather();
+            let metric_families = prometheus::gather();
             let mut buffer = vec![];
             let encoder = TextEncoder::new();
             encoder.encode(&metric_families, &mut buffer).unwrap();
@@ -229,18 +226,9 @@ async fn serve_request(
     }
 }
 
-async fn serve_metrics(
-    addr: SocketAddr,
-    kill_switch: tokio::sync::oneshot::Receiver<()>,
-    registry: Arc<RwLock<Registry>>,
-) {
-    let server = Server::bind(&addr).serve(make_service_fn(move |_| {
-        let registry2 = registry.clone();
-        async move {
-            Ok::<_, hyper::error::Error>(service_fn(move |req| {
-                serve_request(req, registry2.clone())
-            }))
-        }
+async fn serve_metrics(addr: SocketAddr, kill_switch: tokio::sync::oneshot::Receiver<()>) {
+    let server = Server::bind(&addr).serve(make_service_fn(move |_| async move {
+        Ok::<_, hyper::error::Error>(service_fn(|req| serve_request(req)))
     }));
     let graceful = server.with_graceful_shutdown(async {
         kill_switch.await.ok();
@@ -249,6 +237,21 @@ async fn serve_metrics(
     if let Err(e) = graceful.await {
         error!("Metrics server error: {}", e);
     }
+}
+
+fn push_metrics(pushgateway_addr: &String) {
+    dbg!("push_metrics");
+
+    let metric_families = prometheus::gather();
+
+    prometheus::push_metrics(
+        "wascc_push",
+        labels! {},
+        &pushgateway_addr,
+        metric_families,
+        None,
+    )
+    .unwrap();
 }
 
 #[cfg(test)]
@@ -260,11 +263,11 @@ mod tests {
 
     #[test]
     fn test_get_metrics() -> Result<(), reqwest::Error> {
-        let server_addr = ([127, 0, 0, 1], 9898).into();
-        let middleware = PrometheusMiddleware::new(server_addr);
+        let prometheus_addr = ([127, 0, 0, 1], 9898).into();
+        let middleware = PrometheusMiddleware::new(Some(prometheus_addr), None);
         let actor_invocation = Invocation::new(
             "actor_origin".to_owned(),
-            InvocationTarget::Actor("actor".to_owned()),
+            InvocationTarget::Actor("actor_id".to_owned()),
             "actor_op",
             "actor_msg".into(),
         );
@@ -288,7 +291,7 @@ mod tests {
             std::thread::sleep(Duration::from_secs(1));
         }
 
-        let url = format!("http://{}/metrics", &server_addr.to_string());
+        let url = format!("http://{}/metrics", &prometheus_addr.to_string());
         // TODO TEMP for manual debug/testing
         std::thread::sleep(Duration::from_secs(3000));
         let body = reqwest::blocking::get(&url)?.text()?;
@@ -300,5 +303,40 @@ mod tests {
             .find(&format!("actor_total_call_count {}", invocations))
             .is_some());
         Ok(())
+    }
+
+    #[test]
+    fn test_push_metrics() {
+        let prometheus_addr = ([127, 0, 0, 1], 9898).into();
+        let pushgateway_addr = "http://127.0.0.1/9091";
+        let middleware =
+            PrometheusMiddleware::new(Some(prometheus_addr), Some(pushgateway_addr.to_owned()));
+        let actor_invocation = Invocation::new(
+            "actor_origin".to_owned(),
+            InvocationTarget::Actor("actor_id".to_owned()),
+            "actor_op",
+            "actor_msg".into(),
+        );
+        let cap_invocation = Invocation::new(
+            "cap_origin".to_owned(),
+            InvocationTarget::Capability {
+                capid: "capid".to_owned(),
+                binding: "binding".to_owned(),
+            },
+            "cap_op",
+            "cap_msg".into(),
+        );
+        let invocations = random::<u16>();
+
+        for _ in 0..invocations {
+            middleware
+                .actor_pre_invoke(actor_invocation.clone())
+                .unwrap();
+            middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
+            // TODO TEMP for manual debug/testing
+            std::thread::sleep(Duration::from_secs(1));
+        }
+
+        std::thread::sleep(Duration::from_secs(1000));
     }
 }
