@@ -13,9 +13,10 @@ use std::time::Duration;
 
 struct PrometheusMiddleware {
     metrics: Arc<RwLock<Metrics>>,
-    metrics_server_handle: Option<JoinHandle<std::result::Result<(), tokio::task::JoinError>>>,
+    metrics_server_handle: Option<JoinHandle<()>>,
     metrics_server_kill_switch: Option<tokio::sync::oneshot::Sender<()>>,
-    // metrics_push_handle: Option<JoinHandle<std::result::Result<(), tokio::task::JoinError>>>,
+    metrics_push_handle: Option<JoinHandle<()>>,
+    metrics_push_kill_switch: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 struct Metrics {
@@ -38,45 +39,48 @@ impl PrometheusMiddleware {
         PrometheusMiddleware::init_registry(&metrics);
         let metrics = Arc::new(RwLock::new(metrics));
 
-        // TODO Can we reuse the same thread?
         let (metrics_server_handle, metrics_server_kill_switch) =
             if let Some(addr) = prometheus_addr {
-                let (kill_switch_sender, kill_switch_receiver) = tokio::sync::oneshot::channel();
+                let (metrics_server_kill_switch, mut server_kill_switch_rx) =
+                    tokio::sync::oneshot::channel();
 
-                let metrics_server_handle = std::thread::spawn(move || {
+                let thread_handle = std::thread::spawn(move || {
                     let mut rt =
                         tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-                    let server_task = rt.spawn(serve_metrics(addr, kill_switch_receiver));
-                    // let _c = rt.spawn(async move {
-                    //     let addr = pushgateway_addr.clone();
-                    //
-                    //     loop {
-                    //         push_metrics(&addr.clone().unwrap());
-                    //         // tokio::time::delay_for(Duration::from_secs(1)).await;
-                    //     }
-                    // });
-                    rt.block_on(server_task)
-                    // rt.block_on(_c)
+                    rt.block_on(async {
+                        tokio::select! {
+                            _ = serve_metrics(addr) => {}
+                            _ = (&mut server_kill_switch_rx) => {}
+                        }
+                    })
                 });
 
-                (Some(metrics_server_handle), Some(kill_switch_sender))
+                (Some(thread_handle), Some(metrics_server_kill_switch))
             } else {
                 (None, None)
             };
 
-        // let metrics_push_handle = if let Some(addr) = pushgateway_addr {
-        //     let metrics_push_handle = std::thread::spawn(move || {
-        //         push_metrics();
-        //     });
-        //
-        //     metrics_push_handle
-        // };
+        let (metrics_push_handle, metrics_push_kill_switch) = if let Some(addr) = pushgateway_addr {
+            let (metrics_push_kill_switch, metrics_push_kill_switch_rx) =
+                tokio::sync::oneshot::channel();
+
+            // need a separate thread for the pushing metrics because reqwest sync client
+            // is used in the prometheus library. reqwest sync creates a tokio runtime.
+            let thread_handle = std::thread::spawn(move || {
+                push_metrics(addr, metrics_push_kill_switch_rx);
+            });
+
+            (Some(thread_handle), Some(metrics_push_kill_switch))
+        } else {
+            (None, None)
+        };
 
         Self {
             metrics,
             metrics_server_handle,
             metrics_server_kill_switch,
-            // metrics_push_handle,
+            metrics_push_handle,
+            metrics_push_kill_switch,
         }
     }
 
@@ -205,6 +209,16 @@ impl Drop for PrometheusMiddleware {
                 error!("Error terminating the metrics server thread");
             }
         }
+
+        if let Some(kill_switch) = self.metrics_push_kill_switch.take() {
+            kill_switch.send(()).unwrap();
+        }
+
+        if let Some(thread_handle) = self.metrics_push_handle.take() {
+            if thread_handle.join().is_err() {
+                error!("Error terminating the metrics push thread");
+            }
+        }
     }
 }
 
@@ -226,32 +240,46 @@ async fn serve_request(req: Request<Body>) -> hyper::error::Result<Response<Body
     }
 }
 
-async fn serve_metrics(addr: SocketAddr, kill_switch: tokio::sync::oneshot::Receiver<()>) {
+async fn serve_metrics(addr: SocketAddr) {
     let server = Server::bind(&addr).serve(make_service_fn(move |_| async move {
         Ok::<_, hyper::error::Error>(service_fn(|req| serve_request(req)))
     }));
-    let graceful = server.with_graceful_shutdown(async {
-        kill_switch.await.ok();
-    });
 
-    if let Err(e) = graceful.await {
+    if let Err(e) = server.await {
         error!("Metrics server error: {}", e);
     }
 }
 
-fn push_metrics(pushgateway_addr: &String) {
-    dbg!("push_metrics");
+fn push_metrics(
+    pushgateway_addr: String,
+    mut push_kill_switch_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    let push_interval = Duration::from_secs(5);
 
-    let metric_families = prometheus::gather();
+    loop {
+        match push_kill_switch_rx.try_recv() {
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+            _ => {
+                return;
+            }
+        }
 
-    prometheus::push_metrics(
-        "wascc_push",
-        labels! {},
-        &pushgateway_addr,
-        metric_families,
-        None,
-    )
-    .unwrap();
+        std::thread::sleep(push_interval.clone());
+
+        let metric_families = prometheus::gather();
+        let push_res = prometheus::push_metrics(
+            "wascc_push",
+            labels! {},
+            &pushgateway_addr,
+            metric_families,
+            None,
+        );
+
+        match push_res {
+            Err(e) => error!("Error pushing metrics to {}: {}", &pushgateway_addr, e),
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -266,19 +294,19 @@ mod tests {
         let prometheus_addr = ([127, 0, 0, 1], 9898).into();
         let middleware = PrometheusMiddleware::new(Some(prometheus_addr), None);
         let actor_invocation = Invocation::new(
-            "actor_origin".to_owned(),
-            InvocationTarget::Actor("actor_id".to_owned()),
-            "actor_op",
-            "actor_msg".into(),
+            "actor_origin_pull".to_owned(),
+            InvocationTarget::Actor("actor_id_pull".to_owned()),
+            "actor_op_pull",
+            "actor_msg_pull".into(),
         );
         let cap_invocation = Invocation::new(
-            "cap_origin".to_owned(),
+            "cap_origin_pull".to_owned(),
             InvocationTarget::Capability {
-                capid: "capid".to_owned(),
-                binding: "binding".to_owned(),
+                capid: "capid_pull".to_owned(),
+                binding: "binding_pull".to_owned(),
             },
-            "cap_op",
-            "cap_msg".into(),
+            "cap_op_pull",
+            "cap_msg_pull".into(),
         );
         let invocations = random::<u16>();
 
@@ -288,12 +316,12 @@ mod tests {
                 .unwrap();
             middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
             // TODO TEMP for manual debug/testing
-            std::thread::sleep(Duration::from_secs(1));
+            // std::thread::sleep(Duration::from_secs(1));
         }
 
         let url = format!("http://{}/metrics", &prometheus_addr.to_string());
         // TODO TEMP for manual debug/testing
-        std::thread::sleep(Duration::from_secs(3000));
+        // std::thread::sleep(Duration::from_secs(3000));
         let body = reqwest::blocking::get(&url)?.text()?;
 
         assert!(body
@@ -305,26 +333,27 @@ mod tests {
         Ok(())
     }
 
+    // TODO The prometheus::default_registry is global static so the counters
+    //      are registered by the first test. Subsequent tests fail on register(..). Use custom registry?
+    #[ignore] // requires a running pushgateway
     #[test]
     fn test_push_metrics() {
-        let prometheus_addr = ([127, 0, 0, 1], 9898).into();
-        let pushgateway_addr = "http://127.0.0.1/9091";
-        let middleware =
-            PrometheusMiddleware::new(Some(prometheus_addr), Some(pushgateway_addr.to_owned()));
+        let pushgateway_addr = "http://127.0.0.1:9091";
+        let middleware = PrometheusMiddleware::new(None, Some(pushgateway_addr.to_owned()));
         let actor_invocation = Invocation::new(
-            "actor_origin".to_owned(),
-            InvocationTarget::Actor("actor_id".to_owned()),
-            "actor_op",
-            "actor_msg".into(),
+            "actor_origin_push".to_owned(),
+            InvocationTarget::Actor("actor_id_push".to_owned()),
+            "actor_op_push",
+            "actor_msg_push".into(),
         );
         let cap_invocation = Invocation::new(
-            "cap_origin".to_owned(),
+            "cap_origin_push".to_owned(),
             InvocationTarget::Capability {
-                capid: "capid".to_owned(),
-                binding: "binding".to_owned(),
+                capid: "capid_push".to_owned(),
+                binding: "binding_push".to_owned(),
             },
-            "cap_op",
-            "cap_msg".into(),
+            "cap_op_push",
+            "cap_msg_push".into(),
         );
         let invocations = random::<u16>();
 
@@ -334,9 +363,9 @@ mod tests {
                 .unwrap();
             middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
             // TODO TEMP for manual debug/testing
-            std::thread::sleep(Duration::from_secs(1));
+            // std::thread::sleep(Duration::from_secs(1));
         }
 
-        std::thread::sleep(Duration::from_secs(1000));
+        // std::thread::sleep(Duration::from_secs(1000));
     }
 }
