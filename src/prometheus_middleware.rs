@@ -31,6 +31,7 @@ struct Metrics {
 }
 
 impl PrometheusMiddleware {
+    // TODO Add proper configuration
     fn new(prometheus_addr: Option<SocketAddr>, pushgateway_addr: Option<String>) -> Self
     where
         Self: Send + Sync,
@@ -64,8 +65,9 @@ impl PrometheusMiddleware {
             let (metrics_push_kill_switch, metrics_push_kill_switch_rx) =
                 tokio::sync::oneshot::channel();
 
-            // need a separate thread for the pushing metrics because reqwest sync client
-            // is used in the prometheus library. reqwest sync creates a tokio runtime.
+            // need a separate thread for pushing metrics because the reqwest sync client
+            // is used in the prometheus library. reqwest sync creates a tokio runtime internally
+            // so the tokio runtime created for the metrics server can't be reused.
             let thread_handle = std::thread::spawn(move || {
                 push_metrics(addr, metrics_push_kill_switch_rx);
             });
@@ -201,7 +203,9 @@ fn pre_invoke(metrics: &Arc<RwLock<Metrics>>, inv: Invocation) -> Result<Invocat
 impl Drop for PrometheusMiddleware {
     fn drop(&mut self) {
         if let Some(kill_switch) = self.metrics_server_kill_switch.take() {
-            kill_switch.send(()).unwrap();
+            if kill_switch.send(()).is_err() {
+                error!("Error terminating the metrics server");
+            }
         }
 
         if let Some(thread_handle) = self.metrics_server_handle.take() {
@@ -211,7 +215,9 @@ impl Drop for PrometheusMiddleware {
         }
 
         if let Some(kill_switch) = self.metrics_push_kill_switch.take() {
-            kill_switch.send(()).unwrap();
+            if kill_switch.send(()).is_err() {
+                error!("Error terminating push of metrics");
+            }
         }
 
         if let Some(thread_handle) = self.metrics_push_handle.take() {
@@ -335,6 +341,7 @@ mod tests {
 
     // TODO The prometheus::default_registry is global static so the counters
     //      are registered by the first test. Subsequent tests fail on register(..). Use custom registry?
+    // TODO Start a stubbed server that the metrics can be pushed to and asserted
     #[ignore] // requires a running pushgateway
     #[test]
     fn test_push_metrics() {
@@ -362,10 +369,8 @@ mod tests {
                 .actor_pre_invoke(actor_invocation.clone())
                 .unwrap();
             middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
-            // TODO TEMP for manual debug/testing
-            // std::thread::sleep(Duration::from_secs(1));
         }
 
-        // std::thread::sleep(Duration::from_secs(1000));
+        // TODO Assert pushed metrics
     }
 }
