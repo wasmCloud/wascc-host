@@ -47,6 +47,7 @@ structopt = { version = "0.3.14", optional = true }
 
 [dev-dependencies]
 reqwest = { version = "0.10", features = ["blocking"] }
+mockito = "0.25"
 
 [features]
 default = []
