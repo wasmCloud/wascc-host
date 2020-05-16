@@ -4,7 +4,7 @@ use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use prometheus::core::{AtomicI64, GenericCounter};
-use prometheus::{labels, register_int_counter, Encoder, Opts, Registry, TextEncoder};
+use prometheus::{labels, Encoder, Registry, TextEncoder};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
@@ -54,6 +54,7 @@ pub struct BasicAuthentication {
 }
 
 impl PrometheusMiddleware {
+    // TODO Return Result<Self>!
     fn new(config: PrometheusConfig) -> Self
     where
         Self: Send + Sync,
@@ -89,12 +90,13 @@ impl PrometheusMiddleware {
             if let Some(push_config) = config.pushgateway_config {
                 let (metrics_push_kill_switch, metrics_push_kill_switch_rx) =
                     tokio::sync::oneshot::channel();
+                let registry2 = registry.clone();
 
                 // need a separate thread for pushing metrics because the reqwest sync client
                 // is used in the prometheus library. reqwest sync creates a tokio runtime internally
                 // so the tokio runtime created for the metrics server can't be reused.
                 let thread_handle = std::thread::spawn(move || {
-                    push_metrics(push_config, metrics_push_kill_switch_rx);
+                    push_metrics(registry2, push_config, metrics_push_kill_switch_rx);
                 });
 
                 (Some(thread_handle), Some(metrics_push_kill_switch))
@@ -112,6 +114,7 @@ impl PrometheusMiddleware {
         }
     }
 
+    // TODO Return Result!
     fn init_registry(metrics: &Metrics) -> Registry {
         let registry = Registry::new();
         registry
@@ -129,7 +132,20 @@ impl PrometheusMiddleware {
         registry
     }
 
+    // TODO Return result
     fn init_metrics() -> Metrics {
+        // let cap_total_call_count: errors::Result<GenericCounter<AtomicI64>> = GenericCounter::new(
+        //     "cap_total_call_count",
+        //     "total number of capability invocations",
+        // );
+        // let cap_total_call_time: errors::Result<GenericCounter<AtomicI64>> = GenericCounter::new(
+        //     "cap_total_call_time",
+        //     "total call time for all capabilities",
+        // );
+
+        // let counters: Vec<GenericCounter<AtomicI64>> =
+        //     vec![cap_total_call_count, cap_total_call_time].collect();
+
         Metrics {
             cap_total_call_count: GenericCounter::new(
                 "cap_total_call_count",
@@ -184,12 +200,13 @@ fn pre_invoke(
     inv: Invocation,
 ) -> Result<Invocation> {
     let mut metrics = metrics.write().unwrap();
-    let registry = registry.write().unwrap();
+
     let target = match &inv.target {
         InvocationTarget::Actor(actor) => actor.clone(),
         InvocationTarget::Capability { capid, binding } => capid.clone() + binding,
     };
-    let key = inv.origin.clone() + &inv.operation + &target;
+    // let key = inv.origin.clone() + &inv.operation + &target;
+    let key = inv.origin.clone() + &target;
 
     match &inv.target {
         InvocationTarget::Actor(actor) => {
@@ -200,7 +217,13 @@ fn pre_invoke(
                 let name = format!("{}_call_count", &actor);
                 let help = format!("number of invocations of {}", &actor);
 
-                match register_new_counter(&mut metrics, &registry, key, &name, &help) {
+                match register_new_counter(
+                    &mut metrics.actor_call_count,
+                    &registry,
+                    key,
+                    &name,
+                    &help,
+                ) {
                     Err(e) => error!("Error registering counter '{}': {}", &name, e),
                     _ => (),
                 };
@@ -218,7 +241,13 @@ fn pre_invoke(
                     &capid, &binding
                 );
 
-                match register_new_counter(&mut metrics, &registry, key, &name, &help) {
+                match register_new_counter(
+                    &mut metrics.cap_call_count,
+                    &registry,
+                    key,
+                    &name,
+                    &help,
+                ) {
                     Err(e) => error!("Error registering counter '{}': {}", &name, e),
                     _ => (),
                 };
@@ -230,19 +259,19 @@ fn pre_invoke(
 }
 
 fn register_new_counter(
-    metrics: &mut RwLockWriteGuard<Metrics>,
-    registry: &RwLockWriteGuard<Registry>,
+    counters: &mut HashMap<String, GenericCounter<AtomicI64>>,
+    registry: &Arc<RwLock<Registry>>,
     key: String,
     counter_name: &String,
     counter_help: &String,
 ) -> prometheus::Result<()> {
     let counter = GenericCounter::new(counter_name.clone(), counter_help.clone())?;
-    // TODO Is this correct handling of the counter?
-    //  Would not like to clone really... Want to point to the
-    //  same counter from two places. Store an Arc in the HashMap?
     counter.inc();
-    registry.register(Box::new(counter.clone()))?;
-    metrics.actor_call_count.insert(key, counter);
+
+    let reg = registry.write().unwrap();
+    reg.register(Box::new(counter.clone()))?;
+
+    counters.insert(key, counter);
     Ok(())
 }
 
@@ -317,6 +346,7 @@ async fn serve_metrics(addr: SocketAddr, registry: Arc<RwLock<Registry>>) {
 }
 
 fn push_metrics(
+    registry: Arc<RwLock<Registry>>,
     push_config: PushgatewayConfig,
     mut push_kill_switch_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
@@ -331,8 +361,6 @@ fn push_metrics(
             }
         }
 
-        let metric_families = prometheus::gather();
-
         let basic_auth = if let Some(basic_auth) = &push_config.push_basic_auth {
             Some(prometheus::BasicAuthentication {
                 username: basic_auth.username.clone(),
@@ -340,6 +368,13 @@ fn push_metrics(
             })
         } else {
             None
+        };
+
+        // make sure the read lock is released before we start
+        // pushing or sleeping on this thread
+        let metric_families = {
+            let reg = registry.read().unwrap();
+            reg.gather()
         };
 
         let push_res = prometheus::push_metrics(
@@ -368,10 +403,14 @@ mod tests {
     use std::net::SocketAddr;
     use std::time::Duration;
 
+    const CAPID: &str = "capid";
+    const BINDING: &str = "binding";
+    const TARGET_ACTOR: &str = "target_actor";
+
     fn actor_invocation() -> Invocation {
         Invocation::new(
             "actor_origin".to_owned(),
-            InvocationTarget::Actor("actor_id".to_owned()),
+            InvocationTarget::Actor(TARGET_ACTOR.to_owned()),
             "actor_op",
             "actor_msg".into(),
         )
@@ -381,8 +420,8 @@ mod tests {
         Invocation::new(
             "cap_origin".to_owned(),
             InvocationTarget::Capability {
-                capid: "capid".to_owned(),
-                binding: "binding".to_owned(),
+                capid: CAPID.to_owned(),
+                binding: BINDING.to_owned(),
             },
             "cap_op",
             "cap_msg".into(),
@@ -411,13 +450,28 @@ mod tests {
         let url = format!("http://{}/metrics", &server_addr.to_string());
         let body = reqwest::blocking::get(&url)?.text()?;
 
-        // TODO Add asserts for all metrics
+        // actors
+        assert!(body
+            .find(&format!("actor_total_call_count {}", invocations))
+            .is_some());
+        assert!(body
+            .find(&format!("{}_call_count {}", TARGET_ACTOR, invocations))
+            .is_some());
+
+        // capabilities
         assert!(body
             .find(&format!("cap_total_call_count {}", invocations))
             .is_some());
         assert!(body
-            .find(&format!("actor_total_call_count {}", invocations))
+            .find(&format!("{}_{}_call_count {}", CAPID, BINDING, invocations))
             .is_some());
+
+        // TODO Assert call times
+        // cap_total_call_time: GenericCounter<AtomicI64>,
+        // cap_call_time: HashMap<String, GenericCounter<AtomicI64>>,
+        // actor_total_call_time: GenericCounter<AtomicI64>,
+        // actor_call_time: HashMap<String, GenericCounter<AtomicI64>>,
+
         Ok(())
     }
 
@@ -425,22 +479,21 @@ mod tests {
     fn test_push_metrics() {
         let invocations = random::<u8>();
 
-        let actor_total_call_count_matcher = format!("actor_total_call_count {}", invocations);
+        // The data format that is used is not compatible with any current Mockito
+        // matcher. It doesn't currently seem to be possible to get the raw body in
+        // a matcher, see https://github.com/lipanski/mockito/issues/95
         let actor_total_call_count = mock("PUT", "/metrics/job/wascc_push")
             .match_header("content-type", "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited")
             .match_header("content-length", Matcher::Any)
             .match_header("accept", "*/*")
             .match_header("host", Matcher::Any)
-            // .match_body(Matcher::Regex(r"/actor_total_call_count/".to_owned()))
-            .match_body(Matcher::Regex(actor_total_call_count_matcher))
-            // flexible number of invocations to avoid flakiness
-            // due to timing between push interval and waiting for the push to
-            // happen before asserting
+            // flexible number of invocations to avoid flakiness due to timing between 
+            // push interval and waiting for the push to happen before asserting
             .expect_at_least(1)
             .create();
 
         // setup middleware for push
-        let push_interval = Duration::from_millis(500);
+        let push_interval = Duration::from_millis(100);
         let config = PrometheusConfig {
             metrics_server_addr: None,
             pushgateway_config: Some(PushgatewayConfig {
@@ -450,6 +503,7 @@ mod tests {
                 push_basic_auth: None,
             }),
         };
+
         let middleware = PrometheusMiddleware::new(config);
         let actor_invocation = actor_invocation();
         let cap_invocation = cap_invocation();
@@ -460,9 +514,6 @@ mod tests {
                 .unwrap();
             middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
         }
-
-        // wait a little to make sure the push has been done before asserting
-        std::thread::sleep(Duration::from_secs(1));
 
         actor_total_call_count.assert();
     }
