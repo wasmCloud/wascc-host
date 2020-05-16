@@ -34,6 +34,7 @@ pub enum ErrorKind {
     CapabilityProvider(String),
     MiscHost(String),
     Plugin(libloading::Error),
+    Middleware(String),
 }
 
 impl Error {
@@ -57,6 +58,7 @@ impl StdError for Error {
             ErrorKind::CapabilityProvider(_) => "Capability provider failure",
             ErrorKind::MiscHost(_) => "waSCC Host error",
             ErrorKind::Plugin(_) => "Plugin error",
+            ErrorKind::Middleware(_) => "Middleware error",
         }
     }
 
@@ -70,6 +72,7 @@ impl StdError for Error {
             ErrorKind::CapabilityProvider(_) => None,
             ErrorKind::MiscHost(_) => None,
             ErrorKind::Plugin(ref err) => Some(err),
+            ErrorKind::Middleware(_) => None,
         }
     }
 }
@@ -91,6 +94,7 @@ impl fmt::Display for Error {
             }
             ErrorKind::MiscHost(ref err) => write!(f, "waSCC Host Error: {}", err),
             ErrorKind::Plugin(ref err) => write!(f, "Plugin error: {}", err),
+            ErrorKind::Middleware(ref err) => write!(f, "Middleware error: {}", err),
         }
     }
 }
