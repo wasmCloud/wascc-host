@@ -24,9 +24,9 @@ libloading = "0.6.1"
 crossbeam-channel = "0.4.2"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
-prometheus = { version = "0.8", features = ["push"] }
-hyper = "0.13"
-tokio = { version = "0.2", features = ["macros"] }
+prometheus = { version = "0.9", features = ["push"], optional = true }
+hyper = { version = "0.13", optional = true }
+tokio = { version = "0.2", features = ["macros"], optional = true }
 wapc = "0.7.0"
 wascc-codec = "0.6.0"
 wascap = "0.4.5"
@@ -54,6 +54,7 @@ default = []
 manifest = ["serde", "serde_yaml", "serde_json", "envmnt"]
 bin = ["structopt"]
 gantry = ["gantryclient"]
+prometheus_middleware = ["prometheus", "hyper", "tokio"]
 
 [[example]]
 name = "kvcounter_manifest"

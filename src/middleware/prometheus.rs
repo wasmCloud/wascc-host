@@ -1,3 +1,91 @@
+//! # Prometheus Middleware
+//!
+//! [Prometheus][prometheus] is an open-source systems monitoring and alerting toolkit. This
+//! middleware makes it possible to serve metrics for scraping by [Prometheus][prometheus] or
+//! by pushing metrics to the [Prometheus Pushgateway][prometheus_pushgateway]
+//! that is then scraped by [Prometheus][prometheus].
+//!
+//! Enable this middleware using the feature `prometheus_middleware`.
+//!
+//! ## Getting Started
+//!
+//! Here is an example of how to serve metrics for scraping:
+//!
+//! ```
+//! # use std::net::SocketAddr;
+//! let server_addr: SocketAddr = ([127, 0, 0, 1], 9898).into();
+//! let config = wascc_host::middleware::prometheus::PrometheusConfig {
+//!     metrics_server_addr: Some(server_addr),
+//!     pushgateway_config: None,
+//! };
+//! let middleware = wascc_host::middleware::prometheus::PrometheusMiddleware::new(config).unwrap();
+//! ```
+//!
+//! This will expose metrics at `http://127.0.0.1:9898/metrics`. This can be
+//! used as a scraping target in [Prometheus][prometheus].
+//!
+//! Here is a simple [Prometheus][prometheus] configuration that scrapes the above target and
+//! the [Prometheus Pushgateway][prometheus_pushgateway] (save the file as `prometheus.yml`):
+//!
+//! ```yml
+//! global:
+//!   scrape_interval: 15s
+//!
+//! # Scrape configurations
+//! scrape_configs:
+//!   - job_name: "wascc"
+//!     scrape_interval: 5s
+//!     honor_labels: true
+//!     # Scrape waSCC. 'host.docker.internal' points to the host
+//!     static_configs:
+//!       - targets: ["host.docker.internal:9898"]
+//!   - job_name: "pushgateway"
+//!     scrape_interval: 5s
+//!     honor_labels: true
+//!     # Scrape the pushgateway
+//!     static_configs:
+//!       - targets: ["pushgateway:9091"]
+//! ```
+//!
+//! Here is a [Docker Compose][docker_compose] (`docker-compose.yml`) file that spins up containers
+//! running [Prometheus][prometheus], [Prometheus Pushgateway][prometheus_pushgateway], and an
+//! optional [Grafana][grafana] instance. It expects that the [Prometheus][prometheus] configuration file
+//! is located in the same directory.
+//!
+//! ```yml
+//! version: "3.3"
+//! services:
+//!   prometheus:
+//!     image: prom/prometheus
+//!     ports:
+//!       - "9090:9090"
+//!     volumes:
+//!       - .:/etc/prometheus/
+//!
+//!   pushgateway:
+//!     image: prom/pushgateway
+//!     ports:
+//!       - "9091:9091"
+//!     depends_on:
+//!       - prometheus
+//!
+//!   grafana:
+//!     image: grafana/grafana
+//!     ports:
+//!       - "3000:3000"
+//!     depends_on:
+//!       - prometheus
+//! ```
+//!
+//! Start the containers with:
+//!
+//! `docker-compose -f "docker-compose.yml" up -d --build`
+//!
+//! [prometheus]: https://prometheus.io/
+//! [prometheus_pushgateway]: https://github.com/prometheus/pushgateway/blob/master/README.md
+//! [docker_compose]: https://docs.docker.com/compose/
+//! [grafana]: https://grafana.com/
+
 use crate::{errors, Invocation, InvocationResponse, InvocationTarget, Middleware, Result};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
@@ -9,7 +97,8 @@ use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-struct PrometheusMiddleware {
+/// A Prometheus middleware that can serve or push metrics.
+pub struct PrometheusMiddleware {
     metrics: Arc<RwLock<Metrics>>,
     registry: Arc<RwLock<Registry>>,
     metrics_server_handle: Option<JoinHandle<()>>,
@@ -42,22 +131,25 @@ struct Metrics {
     actor_active_inv_time: HashMap<String, Instant>,
 }
 
+/// Configuration parameters.
 #[derive(Clone)]
-struct PrometheusConfig {
+pub struct PrometheusConfig {
     /// The address that Prometheus can scrape (pull model).
-    metrics_server_addr: Option<SocketAddr>,
+    pub metrics_server_addr: Option<SocketAddr>,
     /// Configuration for the Prometheus client (push model).
-    pushgateway_config: Option<PushgatewayConfig>,
+    pub pushgateway_config: Option<PushgatewayConfig>,
 }
 
+/// Configuration parameters for pushing metrics to the Pushgateway.
 #[derive(Clone)]
-struct PushgatewayConfig {
-    pushgateway_addr: String,
-    push_interval: Duration,
-    push_basic_auth: Option<BasicAuthentication>,
-    job: Option<String>,
+pub struct PushgatewayConfig {
+    pub pushgateway_addr: String,
+    pub push_interval: Duration,
+    pub push_basic_auth: Option<BasicAuthentication>,
+    pub job: Option<String>,
 }
 
+/// Basic authentication for authentication with a Pushgateway.
 #[derive(Clone)]
 pub struct BasicAuthentication {
     pub username: String,
@@ -65,7 +157,7 @@ pub struct BasicAuthentication {
 }
 
 impl PrometheusMiddleware {
-    fn new(config: PrometheusConfig) -> Result<Self>
+    pub fn new(config: PrometheusConfig) -> Result<Self>
     where
         Self: Send + Sync,
     {
@@ -429,7 +521,9 @@ fn push_metrics(
 
 #[cfg(test)]
 mod tests {
-    use crate::prometheus_middleware::{PrometheusConfig, PrometheusMiddleware, PushgatewayConfig};
+    use crate::middleware::prometheus::{
+        PrometheusConfig, PrometheusMiddleware, PushgatewayConfig,
+    };
     use crate::{Invocation, InvocationTarget, Middleware};
     use mockito::{mock, Matcher};
     use rand::random;
