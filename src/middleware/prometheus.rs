@@ -47,10 +47,10 @@
 //!       - targets: ["pushgateway:9091"]
 //! ```
 //!
-//! Here is a [Docker Compose][docker_compose] (`docker-compose.yml`) file that spins up containers
+//! [Docker Compose][docker_compose] can be used to run containers with
 //! running [Prometheus][prometheus], [Prometheus Pushgateway][prometheus_pushgateway], and an
 //! optional [Grafana][grafana] instance. It expects that the [Prometheus][prometheus] configuration file
-//! is located in the same directory.
+//! is located in the same directory. Here is the `docker-compose.yml`:
 //!
 //! ```yml
 //! version: "3.3"
