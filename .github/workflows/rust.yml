@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Add aarch64 target
+      run: rustup target add aarch64-unknown-linux-gnu
     - name: Build
       run: cargo build --verbose --all-features
     - name: Run tests
@@ -21,3 +23,5 @@ jobs:
       run: cargo test --verbose --features "manifest"
     - name: Run tests (gantry only)
       run: cargo test --verbose --features "gantry"
+    - name: Build for aarch64
+      run: cargo build --verbose --all-features --target aarch64-unknown-linux-gnu

@@ -1,4 +1,4 @@
-// Copyright 2015-2019 Capital One Services, LLC
+// Copyright 2015-2020 Capital One Services, LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ pub(crate) fn invoke_capability(
 
     let r = match lock.call(router, &inv) {
         Ok(r) => r,
-        Err(e) => InvocationResponse::error(&format!("Failed to invoke capability: {}", e)),
+        Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke capability: {}", e)),
     };
 
     match run_capability_post_invoke(r.clone(), &middlewares.read().unwrap()) {
@@ -75,8 +75,8 @@ pub(crate) fn invoke_actor(
     };
 
     let inv_r = match guest.call(&inv.operation, &inv.msg) {
-        Ok(v) => InvocationResponse::success(v),
-        Err(e) => InvocationResponse::error(&format!("Failed to invoke guest call: {}", e)),
+        Ok(v) => InvocationResponse::success(&inv, v),
+        Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke guest call: {}", e)),
     };
     let lock = middlewares.read().unwrap();
     match run_actor_post_invoke(inv_r.clone(), &lock) {
