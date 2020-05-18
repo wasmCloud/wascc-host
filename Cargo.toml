@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.7.1"
+version = "0.7.2"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -20,11 +20,11 @@ features = [ "gantry", "manifest" ]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-libloading = "0.6.1"
+libloading = "0.6.2"
 crossbeam-channel = "0.4.2"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
-wapc = "0.7.0"
+wapc = "0.7.2"
 wascc-codec = "0.6.0"
 wascap = "0.4.5"
 log = "0.4.8"
@@ -33,10 +33,10 @@ env_logger = "0.7.1"
 
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
-gantryclient = { version = "0.0.4", optional = true }
+gantryclient = { version = "0.0.6", optional = true }
 
 serde = { version = "1.0", features = ["derive"], optional = true }
-serde_yaml = { version = "0.8.11", optional = true }
+serde_yaml = { version = "0.8.12", optional = true }
 serde_json = { version = "1.0", optional = true }
 envmnt = { version = "0.8.2", optional = true }
 

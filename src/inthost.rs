@@ -15,6 +15,7 @@ use router::Router;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use uuid::Uuid;
 use wapc::prelude::*;
 use wascap::jwt::Claims;
 use wascc_codec::{
@@ -196,7 +197,7 @@ impl WasccHost {
                                 InvocationTarget::Actor(tgt_actor) => {
                                     let tgt_claims = claims_map.read().unwrap().get(tgt_actor).cloned().unwrap();
                                     if !authz::can_invoke(&tgt_claims, &capid) {
-                                        InvocationResponse::error(&format!(
+                                        InvocationResponse::error(inv, &format!(
                                             "Dispatch between actor and unauthorized capability: {} <-> {}",
                                             tgt_claims.subject, capid
                                         ))
@@ -205,12 +206,12 @@ impl WasccHost {
                                             Some(ref entry) => {
                                                 match entry.invoke(inv.clone()) {
                                                     Ok(ir) => ir,
-                                                    Err(e) => InvocationResponse::error(&format!(
+                                                    Err(e) => InvocationResponse::error(inv,&format!(
                                                         "Capability to actor call failure: {}", e
                                                     ))
                                                 }
                                             }
-                                            None => InvocationResponse::error("Dispatch to unknown actor"),
+                                            None => InvocationResponse::error(inv, "Dispatch to unknown actor"),
                                         }
                                     }
                                 }
@@ -275,21 +276,21 @@ fn route_key(claims: &Claims<wascap::jwt::Actor>) -> String {
 
 fn live_update(guest: &mut WapcHost, inv: &Invocation) -> InvocationResponse {
     match guest.replace_module(&inv.msg) {
-        Ok(_) => InvocationResponse::success(vec![]),
+        Ok(_) => InvocationResponse::success(inv, vec![]),
         Err(e) => {
             error!("Failed to perform hot swap, ignoring message: {}", e);
-            InvocationResponse::error("Failed to perform hot swap")
+            InvocationResponse::error(inv, "Failed to perform hot swap")
         }
     }
 }
 
 fn gen_liveupdate_invocation(target: &str, bytes: Vec<u8>) -> Invocation {
-    Invocation {
-        msg: bytes,
-        operation: OP_PERFORM_LIVE_UPDATE.to_string(),
-        origin: "system".to_string(),
-        target: InvocationTarget::Actor(target.to_string()),
-    }
+    Invocation::new(
+        "system".to_string(),
+        InvocationTarget::Actor(target.to_string()),
+        OP_PERFORM_LIVE_UPDATE,
+        bytes,
+    )
 }
 
 /// Removes all bindings for a given actor by sending the "deconfigure" message
@@ -333,15 +334,15 @@ fn remove_binding(bindings: Arc<RwLock<BindingsList>>, actor: &str, binding: &st
 }
 
 fn gen_remove_actor(msg: Vec<u8>, binding: &str, capid: &str) -> Invocation {
-    Invocation {
-        origin: "system".to_string(),
-        msg,
-        operation: OP_REMOVE_ACTOR.to_string(),
-        target: InvocationTarget::Capability {
+    Invocation::new(
+        "system".to_string(),
+        InvocationTarget::Capability {
             capid: capid.to_string(),
             binding: binding.to_string(),
         },
-    }
+        OP_REMOVE_ACTOR,
+        msg,
+    )
 }
 /// An immutable representation of an invocation within waSCC
 #[derive(Debug, Clone)]
@@ -350,6 +351,7 @@ pub struct Invocation {
     pub target: InvocationTarget,
     pub operation: String,
     pub msg: Vec<u8>,
+    pub id: String,
 }
 
 /// Represents an invocation target - either an actor or a bound capability provider
@@ -366,6 +368,7 @@ impl Invocation {
             target,
             operation: op.to_string(),
             msg,
+            id: format!("{}", Uuid::new_v4()),
         }
     }
 }
@@ -375,17 +378,23 @@ impl Invocation {
 pub struct InvocationResponse {
     pub msg: Vec<u8>,
     pub error: Option<String>,
+    pub invocation_id: String,
 }
 
 impl InvocationResponse {
-    pub fn success(msg: Vec<u8>) -> InvocationResponse {
-        InvocationResponse { msg, error: None }
+    pub fn success(inv: &Invocation, msg: Vec<u8>) -> InvocationResponse {
+        InvocationResponse {
+            msg,
+            error: None,
+            invocation_id: inv.id.to_string(),
+        }
     }
 
-    pub fn error(err: &str) -> InvocationResponse {
+    pub fn error(inv: &Invocation, err: &str) -> InvocationResponse {
         InvocationResponse {
             msg: Vec::new(),
             error: Some(err.to_string()),
+            invocation_id: inv.id.to_string(),
         }
     }
 }
@@ -466,12 +475,7 @@ fn invocation_from_callback(
             capid: ns.to_string(),
         }
     };
-    Invocation {
-        msg: payload.to_vec(),
-        operation: op.to_string(),
-        origin: origin.to_string(),
-        target,
-    }
+    Invocation::new(origin.to_string(), target, op, payload.to_vec())
 }
 
 pub(crate) fn gen_config_invocation(
@@ -485,13 +489,13 @@ pub(crate) fn gen_config_invocation(
         values,
     };
     let payload = serialize(&cfgvals).unwrap();
-    Invocation {
-        msg: payload,
-        operation: OP_BIND_ACTOR.to_string(),
-        origin: "system".to_string(),
-        target: InvocationTarget::Capability {
+    Invocation::new(
+        "system".to_string(),
+        InvocationTarget::Capability {
             capid: capid.to_string(),
             binding,
         },
-    }
+        OP_BIND_ACTOR,
+        payload,
+    )
 }
