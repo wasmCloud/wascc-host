@@ -90,12 +90,16 @@ use crate::{errors, Invocation, InvocationResponse, InvocationTarget, Middleware
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use prometheus::{labels, Encoder, IntCounter, IntGauge, Registry, TextEncoder};
+use prometheus::{labels, Encoder, Gauge, IntCounter, Registry, TextEncoder};
+use std::cmp::min;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+// The number of invocations to include when calculating average invocation times
+const MOVING_AVERAGE_WINDOW_SIZE: i64 = 100;
 
 /// A Prometheus middleware that can serve or push metrics.
 pub struct PrometheusMiddleware {
@@ -114,22 +118,21 @@ struct Metrics {
     /// Number of invocations per capability
     cap_inv_count: HashMap<String, IntCounter>,
     /// Average invocation time across all capabilities
-    cap_total_average_inv_time: IntGauge,
+    cap_total_average_inv_time: Gauge,
     /// Average invocation time per capability
-    cap_average_inv_time: HashMap<String, IntGauge>,
-    /// Measurements of invocation time for active invocations of capabilities
-    cap_active_inv_time: HashMap<String, InvocationState>,
+    cap_average_inv_time: HashMap<String, Gauge>,
 
     /// Total number of invocations of actors
     actor_total_inv_count: IntCounter,
     /// Number of invocations per actor
     actor_inv_count: HashMap<String, IntCounter>,
     /// Average invocation time across all actors
-    actor_total_average_inv_time: IntGauge,
+    actor_total_average_inv_time: Gauge,
     /// Average invocation time per actor
-    actor_average_inv_time: HashMap<String, IntGauge>,
-    /// Measurements of invocation time for active invocations of actors
-    actor_active_inv_time: HashMap<String, InvocationState>,
+    actor_average_inv_time: HashMap<String, Gauge>,
+
+    /// State of active invocations
+    active_inv_state: HashMap<String, InvocationState>,
 }
 
 /// Configuration parameters.
@@ -159,10 +162,9 @@ pub struct BasicAuthentication {
 
 /// Values needed during an invocation to compute average invocation times.
 struct InvocationState {
-    inv_id: String,
-    inv_start_time: Instant,
-    inv_counter_key: String,
-    inv_target: InvocationTarget,
+    start_time: Instant,
+    counter_key: String,
+    target: InvocationTarget,
 }
 
 impl PrometheusMiddleware {
@@ -238,46 +240,50 @@ impl PrometheusMiddleware {
         Ok(Metrics {
             cap_total_inv_count: IntCounter::new(
                 "cap_total_inv_count",
-                "total number of capability invocations",
+                "Total number of capability invocations",
             )?,
             cap_inv_count: HashMap::new(),
-            cap_total_average_inv_time: IntGauge::new(
+            cap_total_average_inv_time: Gauge::new(
                 "cap_total_average_inv_time",
-                "average invocation time across all capabilities",
+                "Average invocation time across all capabilities",
             )?,
             cap_average_inv_time: HashMap::new(),
-            cap_active_inv_time: HashMap::new(),
-
             actor_total_inv_count: IntCounter::new(
                 "actor_total_inv_count",
-                "total number of actor invocations",
+                "Total number of actor invocations",
             )?,
             actor_inv_count: HashMap::new(),
-            actor_total_average_inv_time: IntGauge::new(
+            actor_total_average_inv_time: Gauge::new(
                 "actor_total_average_inv_time",
-                "average invocation time across all actors",
+                "Average invocation time across all actors",
             )?,
             actor_average_inv_time: HashMap::new(),
-            actor_active_inv_time: HashMap::new(),
+            active_inv_state: HashMap::new(),
         })
     }
 }
 
 impl Middleware for PrometheusMiddleware {
     fn actor_pre_invoke(&self, inv: Invocation) -> Result<Invocation> {
-        pre_invoke(&self.metrics, &self.registry, inv)
+        pre_invoke_count_inv(&self.metrics, &self.registry, &inv.origin, &inv.target);
+        pre_invoke_measure_inv_time(&self.metrics, &inv);
+        Ok(inv)
     }
 
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
-        post_invoke_measure_time(&self.metrics, &self.registry, response)
+        post_invoke_measure_inv_time(&self.metrics, &self.registry, &response);
+        Ok(response)
     }
 
     fn capability_pre_invoke(&self, inv: Invocation) -> Result<Invocation> {
-        pre_invoke(&self.metrics, &self.registry, inv)
+        pre_invoke_count_inv(&self.metrics, &self.registry, &inv.origin, &inv.target);
+        pre_invoke_measure_inv_time(&self.metrics, &inv);
+        Ok(inv)
     }
 
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
-        post_invoke_measure_time(&self.metrics, &self.registry, response)
+        post_invoke_measure_inv_time(&self.metrics, &self.registry, &response);
+        Ok(response)
     }
 }
 
@@ -296,22 +302,24 @@ impl From<prometheus::Error> for errors::Error {
     }
 }
 
-fn pre_invoke(
+fn pre_invoke_count_inv(
     metrics: &Arc<RwLock<Metrics>>,
     registry: &Arc<RwLock<Registry>>,
-    inv: Invocation,
-) -> Result<Invocation> {
+    origin: &str,
+    target: &InvocationTarget,
+) {
     let mut metrics = metrics.write().unwrap();
-    let key = get_counter_key(&inv);
+    let key = get_counter_key(origin, target);
 
-    match &inv.target {
+    match target {
         InvocationTarget::Actor(actor) => {
             metrics.actor_total_inv_count.inc();
+
             if let Some(value) = metrics.actor_inv_count.get(&key) {
                 value.inc();
             } else {
                 let name = format!("{}_inv_count", &actor);
-                let help = format!("number of invocations of {}", &actor);
+                let help = format!("Number of invocations of actor '{}'", &actor);
 
                 if let Err(e) =
                     register_counter(&mut metrics.actor_inv_count, &registry, key, &name, &help)
@@ -328,7 +336,7 @@ fn pre_invoke(
             } else {
                 let name = format!("{}_{}_inv_count", &capid, &binding);
                 let help = format!(
-                    "number of invocations of capability {} with binding {}",
+                    "Number of invocations of capability '{}' with binding '{}'",
                     &capid, &binding
                 );
 
@@ -340,18 +348,16 @@ fn pre_invoke(
             }
         }
     }
-
-    Ok(inv)
 }
 
-fn get_counter_key(inv: &Invocation) -> String {
-    let target = match &inv.target {
+fn get_counter_key(origin: &str, target: &InvocationTarget) -> String {
+    let target = match target {
         InvocationTarget::Actor(actor) => actor.clone(),
         InvocationTarget::Capability { capid, binding } => capid.clone() + binding,
     };
 
     // count invocations per sender<->receiver pair
-    inv.origin.clone() + &target
+    origin.to_string() + &target
 }
 
 fn register_counter(
@@ -371,124 +377,164 @@ fn register_counter(
     Ok(())
 }
 
-fn pre_invoke_measure_time(metrics: &Arc<RwLock<Metrics>>, inv: Invocation) -> Result<Invocation> {
+fn pre_invoke_measure_inv_time(metrics: &Arc<RwLock<Metrics>>, inv: &Invocation) {
     let mut metrics = metrics.write().unwrap();
-    let inv_counter_key = get_counter_key(&inv);
+    let inv_counter_key = get_counter_key(&inv.origin, &inv.target);
     let state = InvocationState {
-        inv_id: inv.id.clone(),
-        inv_start_time: Instant::now(),
-        inv_counter_key: inv_counter_key.clone(),
-        inv_target: inv.target.clone(),
+        start_time: Instant::now(),
+        counter_key: inv_counter_key.clone(),
+        target: inv.target.clone(),
     };
 
-    match &inv.target {
-        InvocationTarget::Actor(_) => {
-            if metrics.actor_active_inv_time.get(&inv.id).is_none() {
-                metrics
-                    .actor_active_inv_time
-                    .insert(state.inv_counter_key.clone(), state);
-            } else {
-                error!(
-                    "Invocation of actor already in progress with id '{}'",
-                    &inv_counter_key
-                );
+    if metrics
+        .active_inv_state
+        .insert(inv.id.clone(), state)
+        .is_some()
+    {
+        error!(
+            "Invocation already in progress with id '{}'",
+            &inv_counter_key
+        );
+    }
+}
+
+fn post_invoke_measure_inv_time(
+    metrics: &Arc<RwLock<Metrics>>,
+    registry: &Arc<RwLock<Registry>>,
+    response: &InvocationResponse,
+) {
+    let mut metrics = metrics.write().unwrap();
+    let inv_end_time = Instant::now();
+
+    // get the state for this invocation
+    if let Some(state) = metrics.active_inv_state.remove(&response.invocation_id) {
+        let inv_time = if let Some(time) = inv_end_time.checked_duration_since(state.start_time) {
+            time.as_millis()
+        } else {
+            error!(
+                "Unable to compute invocation time for id '{}'",
+                &response.invocation_id
+            );
+            return;
+        };
+
+        set_new_total_avg(&metrics, &state.target, inv_time);
+
+        // was an actor or a capability invoked?
+        match &state.target {
+            InvocationTarget::Actor(actor) => {
+                let avg_time_key = actor.clone();
+
+                if let Some(gauge) = metrics.actor_average_inv_time.get(&avg_time_key) {
+                    let inv_count = metrics
+                        .actor_inv_count
+                        .get(&state.counter_key)
+                        .map(|c| c.get())
+                        .unwrap_or(1);
+                    gauge.set(calc_avg(inv_count, inv_time, gauge.get()));
+                } else {
+                    let name = format!("{}_average_inv_time", actor.clone());
+                    let help = format!("Average time to invoke actor '{}'", actor.clone());
+
+                    register_gauge(
+                        registry,
+                        &mut metrics.actor_average_inv_time,
+                        &avg_time_key,
+                        &name,
+                        &help,
+                        inv_time,
+                    );
+                }
             }
+            InvocationTarget::Capability { capid, binding } => {
+                let avg_time_key = capid.clone() + binding;
+
+                if let Some(gauge) = metrics.cap_average_inv_time.get(&avg_time_key) {
+                    let inv_count = metrics
+                        .cap_inv_count
+                        .get(&state.counter_key)
+                        .map(|c| c.get())
+                        .unwrap_or(1);
+                    gauge.set(calc_avg(inv_count, inv_time, gauge.get()));
+                } else {
+                    let name = format!("{}_{}_average_inv_time", capid, binding);
+                    let help = format!(
+                        "Average time to invoke capability '{}' with binding '{}'",
+                        capid, binding
+                    );
+
+                    register_gauge(
+                        registry,
+                        &mut metrics.cap_average_inv_time,
+                        &avg_time_key,
+                        &name,
+                        &help,
+                        inv_time,
+                    );
+                }
+            }
+        }
+    } else {
+        error!("No active invocation with id '{}'", &response.invocation_id);
+    }
+}
+
+fn register_gauge(
+    registry: &Arc<RwLock<Registry>>,
+    avg_inv_time: &mut HashMap<String, Gauge>,
+    gauge_lookup_key: &str,
+    name: &str,
+    help: &str,
+    initial_value: u128,
+) {
+    let initial_value = initial_value as f64;
+
+    match Gauge::new(name.to_string(), help.to_string()) {
+        Ok(gauge) => {
+            gauge.set(initial_value);
+            avg_inv_time.insert(gauge_lookup_key.to_string(), gauge.clone());
+
+            if let Err(e) = registry.write().unwrap().register(Box::new(gauge)) {
+                error!("Error registering gauge '{}': {}", &name, e);
+            }
+        }
+        Err(e) => error!("Error creating gauge '{}': {}", &name, e),
+    }
+}
+
+// set new average invocation time across all actors or capabilities
+fn set_new_total_avg(
+    metrics: &RwLockWriteGuard<Metrics>,
+    target: &InvocationTarget,
+    inv_time: u128,
+) {
+    match target {
+        InvocationTarget::Actor(_) => {
+            metrics.actor_total_average_inv_time.set(calc_avg(
+                metrics.actor_total_inv_count.get(),
+                inv_time,
+                metrics.actor_total_average_inv_time.get(),
+            ));
         }
         InvocationTarget::Capability {
             capid: _,
             binding: _,
         } => {
-            if metrics.cap_active_inv_time.get(&inv_counter_key).is_none() {
-                metrics
-                    .cap_active_inv_time
-                    .insert(inv_counter_key.clone(), state);
-            } else {
-                error!(
-                    "Invocation of capability already in progress with id '{}'",
-                    &inv_counter_key
-                );
-            }
+            metrics.cap_total_average_inv_time.set(calc_avg(
+                metrics.cap_total_inv_count.get(),
+                inv_time,
+                metrics.cap_total_average_inv_time.get(),
+            ));
         }
-    }
-
-    Ok(inv)
+    };
 }
 
-fn post_invoke_measure_time(
-    metrics: &Arc<RwLock<Metrics>>,
-    registry: &Arc<RwLock<Registry>>,
-    response: InvocationResponse,
-) -> Result<InvocationResponse> {
-    let mut metrics = metrics.write().unwrap();
-    let inv_end_time = Instant::now();
-
-    // TODO Can the actor_active_inv_time and cap_active_inv_time be merged? Maybe can
-    //      hold the difference in the InvocationState. Would save some coding...
-    // was the current invocation started in an actor?
-    if let Some(state) = metrics.actor_active_inv_time.get(&response.invocation_id) {
-        let inv_time = inv_end_time
-            .duration_since(state.inv_start_time)
-            .as_millis();
-        let inv_count = metrics
-            .actor_inv_count
-            .get(&state.inv_counter_key)
-            .map(|c| c.get())
-            .unwrap_or(1);
-
-        // was an actor or a capability invoked?
-        match &state.inv_target {
-            InvocationTarget::Actor(actor) => {
-                if let Some(gauge) = metrics.actor_average_inv_time.get(actor) {
-                    set_new_avg(inv_time, inv_count, gauge);
-                } else {
-                    let name = format!("{}_avg_inv_time", actor);
-                    let help = format!("Average time to invoke actor {}", actor);
-
-                    if let Err(e) = register_gauge(
-                        registry,
-                        &mut metrics.actor_average_inv_time,
-                        actor,
-                        &name,
-                        &help,
-                    ) {
-                        error!("Error registering gauge '{}': {}", &name, e);
-                    }
-                }
-            }
-            InvocationTarget::Capability { capid, binding } => {}
-        }
-    }
-    // was the current invocation started in a capability?
-    else if let Some(state) = metrics.cap_active_inv_time.get(&response.invocation_id) {
-        //metrics.cap_active_inv_time.insert(key, Instant::now());
-        dbg!("Implement this");
-    } else {
-        error!("No active invocation with id '{}'", &response.invocation_id);
-    }
-
-    Ok(response)
-}
-
-fn register_gauge(
-    registry: &Arc<RwLock<Registry>>,
-    avg_inv_time: &mut HashMap<String, IntGauge>,
-    gauge_lookup_key: &String,
-    name: &str,
-    help: &str,
-) -> prometheus::Result<()> {
-    let gauge = IntGauge::new(name.to_string(), help.to_string())?;
-    registry
-        .write()
-        .unwrap()
-        .register(Box::new(gauge.clone()))?;
-    avg_inv_time.insert(gauge_lookup_key.to_string(), gauge);
-    Ok(())
-}
-
-fn set_new_avg(inv_time: u128, inv_count: i64, gauge: &IntGauge) {
-    let current_total_inv_time = gauge.get() * inv_count;
-    let new_avg = (current_total_inv_time + inv_time as i64) / (inv_count + 1);
-    gauge.set(new_avg);
+fn calc_avg(inv_count: i64, inv_time: u128, current_avg_inv_time: f64) -> f64 {
+    let inv_time = inv_time as f64;
+    let inv_count = min(inv_count, MOVING_AVERAGE_WINDOW_SIZE);
+    // invocations are counted in pre_invoke so the `inv_count` _includes_ the current invocation
+    let total_current_inv_time = current_avg_inv_time * (inv_count - 1) as f64;
+    (total_current_inv_time + inv_time as f64) / inv_count as f64
 }
 
 impl Drop for PrometheusMiddleware {
@@ -602,7 +648,7 @@ fn push_metrics(
             metric_families,
             basic_auth,
         ) {
-            error!("Error pushing metrics to {}: {}", &pushgateway_addr, e);
+            error!("Error pushing metrics to '{}': {}", &pushgateway_addr, e);
         }
 
         std::thread::sleep(push_config.push_interval);
@@ -614,7 +660,7 @@ mod tests {
     use crate::middleware::prometheus::{
         PrometheusConfig, PrometheusMiddleware, PushgatewayConfig,
     };
-    use crate::{Invocation, InvocationTarget, Middleware};
+    use crate::{Invocation, InvocationResponse, InvocationTarget, Middleware};
     use mockito::{mock, Matcher};
     use rand::random;
     use std::net::SocketAddr;
@@ -646,6 +692,14 @@ mod tests {
         )
     }
 
+    fn invocation_response(id: &String) -> InvocationResponse {
+        InvocationResponse {
+            msg: "response".as_bytes().to_vec(),
+            error: None,
+            invocation_id: id.clone(),
+        }
+    }
+
     #[test]
     fn test_serve_metrics() -> Result<(), reqwest::Error> {
         let server_addr: SocketAddr = ([127, 0, 0, 1], 9898).into();
@@ -653,20 +707,47 @@ mod tests {
             metrics_server_addr: Some(server_addr),
             pushgateway_config: None,
         };
+
         let middleware = PrometheusMiddleware::new(config).unwrap();
-        let invocations = random::<u8>();
         let actor_invocation = actor_invocation();
+        let actor_invocation_response = invocation_response(&actor_invocation.id);
         let cap_invocation = cap_invocation();
+        let cap_invocation_response = invocation_response(&cap_invocation.id);
+        let invocations = random::<u8>();
 
         for _ in 0..invocations {
             middleware
                 .actor_pre_invoke(actor_invocation.clone())
                 .unwrap();
             middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
+
+            // simulate that the invocation takes some time
+            std::thread::sleep(Duration::from_millis(1));
+
+            middleware
+                .actor_post_invoke(cap_invocation_response.clone())
+                .unwrap();
+            middleware
+                .actor_post_invoke(actor_invocation_response.clone())
+                .unwrap();
         }
 
         let url = format!("http://{}/metrics", &server_addr.to_string());
         let body = reqwest::blocking::get(&url)?.text()?;
+
+        // get average times directly from the middleware and assert they are served
+        let actor_total_average_time = &middleware
+            .metrics
+            .read()
+            .unwrap()
+            .actor_total_average_inv_time
+            .get();
+        let cap_total_average_time = &middleware
+            .metrics
+            .read()
+            .unwrap()
+            .cap_total_average_inv_time
+            .get();
 
         // capabilities
         assert!(body
@@ -676,9 +757,17 @@ mod tests {
             .find(&format!("{}_{}_inv_count {}", CAPID, BINDING, invocations))
             .is_some());
         assert!(body
-            .find(&format!("cap_total_average_inv_time 0"))
+            .find(&format!(
+                "cap_total_average_inv_time {}",
+                cap_total_average_time
+            ))
             .is_some());
-        // TODO Add assert for cap_average_inv_time
+        assert!(body
+            .find(&format!(
+                "{}_{}_average_inv_time {}",
+                CAPID, BINDING, cap_total_average_time
+            ))
+            .is_some());
 
         // actors
         assert!(body
@@ -688,17 +777,31 @@ mod tests {
             .find(&format!("{}_inv_count {}", TARGET_ACTOR, invocations))
             .is_some());
         assert!(body
-            .find(&format!("actor_total_average_inv_time 0"))
+            .find(&format!(
+                "actor_total_average_inv_time {}",
+                actor_total_average_time
+            ))
             .is_some());
-        // TODO Add assert for actor_average_inv_time
+        assert!(body
+            .find(&format!(
+                "{}_average_inv_time {}",
+                TARGET_ACTOR, actor_total_average_time
+            ))
+            .is_some());
+
+        // check that invocation state is cleaned up
+        assert!(middleware
+            .metrics
+            .read()
+            .unwrap()
+            .active_inv_state
+            .is_empty());
 
         Ok(())
     }
 
     #[test]
     fn test_push_metrics() {
-        let invocations = random::<u8>();
-
         // The data format that is used is not compatible with any current Mockito
         // matcher. It doesn't currently seem to be possible to get the raw body in
         // a matcher, see https://github.com/lipanski/mockito/issues/95
@@ -710,6 +813,7 @@ mod tests {
             // flexible number of invocations to avoid flakiness due to timing between 
             // push interval and waiting for the push to happen before asserting
             .expect_at_least(1)
+            // start serving the mock
             .create();
 
         // setup middleware for push
@@ -726,18 +830,38 @@ mod tests {
 
         let middleware = PrometheusMiddleware::new(config).unwrap();
         let actor_invocation = actor_invocation();
+        let actor_invocation_response = invocation_response(&actor_invocation.id);
         let cap_invocation = cap_invocation();
+        let cap_invocation_response = invocation_response(&cap_invocation.id);
+        let invocations = random::<u8>();
 
         for _ in 0..invocations {
             middleware
                 .actor_pre_invoke(actor_invocation.clone())
                 .unwrap();
             middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
+
+            // simulate that the invocation takes some time
+            std::thread::sleep(Duration::from_millis(1));
+
+            middleware
+                .actor_post_invoke(cap_invocation_response.clone())
+                .unwrap();
+            middleware
+                .actor_post_invoke(actor_invocation_response.clone())
+                .unwrap();
         }
 
-        // make sure at least one push is done before asserting
+        // make sure at least one push has time to complete before asserting
         std::thread::sleep(push_interval.mul(2));
 
         pushed_metrics.assert();
+        // check that invocation state is cleaned up
+        assert!(middleware
+            .metrics
+            .read()
+            .unwrap()
+            .active_inv_state
+            .is_empty());
     }
 }
