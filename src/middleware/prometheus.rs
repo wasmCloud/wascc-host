@@ -17,6 +17,7 @@
 //! let config = wascc_host::middleware::prometheus::PrometheusConfig {
 //!     metrics_server_addr: Some(server_addr),
 //!     pushgateway_config: None,
+//!     moving_average_window_size: None,
 //! };
 //! let middleware = wascc_host::middleware::prometheus::PrometheusMiddleware::new(config).unwrap();
 //! ```
@@ -98,8 +99,8 @@ use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-// The number of invocations to include when calculating average invocation times
-const MOVING_AVERAGE_WINDOW_SIZE: i64 = 100;
+// The default number of invocations to include when calculating average invocation times
+const DEFAULT_MOVING_AVERAGE_WINDOW_SIZE: i64 = 100;
 
 /// A Prometheus middleware that can serve or push metrics.
 pub struct PrometheusMiddleware {
@@ -133,6 +134,8 @@ struct Metrics {
 
     /// State of active invocations
     active_inv_state: HashMap<String, InvocationState>,
+
+    moving_average_window_size: i64,
 }
 
 /// Configuration parameters.
@@ -142,6 +145,9 @@ pub struct PrometheusConfig {
     pub metrics_server_addr: Option<SocketAddr>,
     /// Configuration for the Prometheus client (push model).
     pub pushgateway_config: Option<PushgatewayConfig>,
+    /// Configure the number of invocations to include when calculating average invocation times.
+    /// The default is 100.
+    pub moving_average_window_size: Option<i64>,
 }
 
 /// Configuration parameters for pushing metrics to the Pushgateway.
@@ -172,7 +178,7 @@ impl PrometheusMiddleware {
     where
         Self: Send + Sync,
     {
-        let metrics = PrometheusMiddleware::init_metrics()?;
+        let metrics = PrometheusMiddleware::init_metrics(&config)?;
         let registry = PrometheusMiddleware::init_registry(&metrics)?;
         let metrics = Arc::new(RwLock::new(metrics));
         let registry = Arc::new(RwLock::new(registry));
@@ -236,7 +242,7 @@ impl PrometheusMiddleware {
         Ok(registry)
     }
 
-    fn init_metrics() -> Result<Metrics> {
+    fn init_metrics(config: &PrometheusConfig) -> Result<Metrics> {
         Ok(Metrics {
             cap_total_inv_count: IntCounter::new(
                 "cap_total_inv_count",
@@ -259,6 +265,9 @@ impl PrometheusMiddleware {
             )?,
             actor_average_inv_time: HashMap::new(),
             active_inv_state: HashMap::new(),
+            moving_average_window_size: config
+                .moving_average_window_size
+                .unwrap_or_else(|| DEFAULT_MOVING_AVERAGE_WINDOW_SIZE),
         })
     }
 }
@@ -431,7 +440,12 @@ fn post_invoke_measure_inv_time(
                         .get(&state.counter_key)
                         .map(|c| c.get())
                         .unwrap_or(1);
-                    gauge.set(calc_avg(inv_count, inv_time, gauge.get()));
+                    gauge.set(calc_avg(
+                        metrics.moving_average_window_size,
+                        inv_count,
+                        inv_time,
+                        gauge.get(),
+                    ));
                 } else {
                     let name = format!("{}_average_inv_time", actor.clone());
                     let help = format!("Average time to invoke actor '{}'", actor.clone());
@@ -455,7 +469,12 @@ fn post_invoke_measure_inv_time(
                         .get(&state.counter_key)
                         .map(|c| c.get())
                         .unwrap_or(1);
-                    gauge.set(calc_avg(inv_count, inv_time, gauge.get()));
+                    gauge.set(calc_avg(
+                        metrics.moving_average_window_size,
+                        inv_count,
+                        inv_time,
+                        gauge.get(),
+                    ));
                 } else {
                     let name = format!("{}_{}_average_inv_time", capid, binding);
                     let help = format!(
@@ -511,6 +530,7 @@ fn set_new_total_avg(
     match target {
         InvocationTarget::Actor(_) => {
             metrics.actor_total_average_inv_time.set(calc_avg(
+                metrics.moving_average_window_size,
                 metrics.actor_total_inv_count.get(),
                 inv_time,
                 metrics.actor_total_average_inv_time.get(),
@@ -521,6 +541,7 @@ fn set_new_total_avg(
             binding: _,
         } => {
             metrics.cap_total_average_inv_time.set(calc_avg(
+                metrics.moving_average_window_size,
                 metrics.cap_total_inv_count.get(),
                 inv_time,
                 metrics.cap_total_average_inv_time.get(),
@@ -529,9 +550,14 @@ fn set_new_total_avg(
     };
 }
 
-fn calc_avg(inv_count: i64, inv_time: u128, current_avg_inv_time: f64) -> f64 {
+fn calc_avg(
+    moving_average_window_size: i64,
+    inv_count: i64,
+    inv_time: u128,
+    current_avg_inv_time: f64,
+) -> f64 {
     let inv_time = inv_time as f64;
-    let inv_count = min(inv_count, MOVING_AVERAGE_WINDOW_SIZE);
+    let inv_count = min(inv_count, moving_average_window_size);
     // invocations are counted in pre_invoke so the `inv_count` _includes_ the current invocation
     let total_current_inv_time = current_avg_inv_time * (inv_count - 1) as f64;
     (total_current_inv_time + inv_time as f64) / inv_count as f64
@@ -706,6 +732,7 @@ mod tests {
         let config = PrometheusConfig {
             metrics_server_addr: Some(server_addr),
             pushgateway_config: None,
+            moving_average_window_size: None,
         };
 
         let middleware = PrometheusMiddleware::new(config).unwrap();
@@ -826,6 +853,7 @@ mod tests {
                 job: None,
                 push_basic_auth: None,
             }),
+            moving_average_window_size: None,
         };
 
         let middleware = PrometheusMiddleware::new(config).unwrap();
