@@ -30,6 +30,7 @@ mod prometheus_example {
         let config = PrometheusConfig {
             metrics_server_addr: Some(server_addr),
             pushgateway_config: None,
+            moving_average_window_size: None,
         };
         host.add_middleware(PrometheusMiddleware::new(config).unwrap());
 
