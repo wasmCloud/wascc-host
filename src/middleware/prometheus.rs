@@ -819,6 +819,7 @@ mod tests {
     const BINDING: &str = "binding";
     const TARGET_ACTOR: &str = "target_actor";
 
+    // TODO Create 2 invocations of actor and capability that calls different operations
     fn actor_invocation() -> Invocation {
         Invocation::new(
             "actor_origin".to_owned(),
@@ -884,6 +885,7 @@ mod tests {
         let url = format!("http://{}/metrics", &server_addr.to_string());
         let body = reqwest::blocking::get(&url)?.text()?;
 
+        // TODO Add helper function to get value from Gauge
         // get average times directly from the middleware and assert they are served
         let actor_total_average_time = &middleware
             .metrics
@@ -897,6 +899,8 @@ mod tests {
             .unwrap()
             .cap_total_average_inv_time
             .get();
+
+        // TODO Add assertions for all metrics
 
         // capabilities
         assert!(body
@@ -946,7 +950,7 @@ mod tests {
             .active_inv_state
             .is_empty());
 
-        std::thread::sleep(Duration::from_secs(78478948));
+        // std::thread::sleep(Duration::from_secs(78478948));
 
         Ok(())
     }
