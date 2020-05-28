@@ -584,7 +584,7 @@ fn post_invoke_measure_inv_time(
 
                 if let Some(gauge) = metrics
                     .cap_operation_average_inv_time
-                    .get(&state.metric_key)
+                    .get(&state.operation_metric_key)
                 {
                     let inv_count = metrics
                         .cap_operation_inv_count
@@ -598,7 +598,10 @@ fn post_invoke_measure_inv_time(
                         gauge.get(),
                     ));
                 } else {
-                    let name = format!("{}_{}_average_inv_time", capid, binding);
+                    let name = format!(
+                        "{}_{}_{}_average_inv_time",
+                        capid, binding, &state.operation
+                    );
                     let help = format!(
                         "Average time to invoke operation '{}' on capability '{}' with binding '{}'",
                         &state.operation, capid, binding
@@ -815,28 +818,35 @@ mod tests {
     use std::ops::Mul;
     use std::time::Duration;
 
-    const CAPID: &str = "capid";
-    const BINDING: &str = "binding";
-    const TARGET_ACTOR: &str = "target_actor";
+    const CAPID1: &str = "capid1";
+    const CAPID2: &str = "capid2";
+    const BINDING1: &str = "binding1";
+    const BINDING2: &str = "binding2";
+    const CAP_OPERATION1: &str = "operation1";
+    const CAP_OPERATION2: &str = "operation2";
 
-    // TODO Create 2 invocations of actor and capability that calls different operations
-    fn actor_invocation() -> Invocation {
+    const ACTOR1: &str = "actor1";
+    const ACTOR2: &str = "actor2";
+    const ACTOR_OPERATION1: &str = "operation1";
+    const ACTOR_OPERATION2: &str = "operation2";
+
+    fn actor_invocation(actor: &str, operation: &str) -> Invocation {
         Invocation::new(
             "actor_origin".to_owned(),
-            InvocationTarget::Actor(TARGET_ACTOR.to_owned()),
-            "actor_op",
+            InvocationTarget::Actor(actor.to_owned()),
+            operation,
             "actor_msg".into(),
         )
     }
 
-    fn cap_invocation() -> Invocation {
+    fn cap_invocation(capid: &str, binding: &str, operation: &str) -> Invocation {
         Invocation::new(
             "cap_origin".to_owned(),
             InvocationTarget::Capability {
-                capid: CAPID.to_owned(),
-                binding: BINDING.to_owned(),
+                capid: capid.to_owned(),
+                binding: binding.to_owned(),
             },
-            "cap_op",
+            operation,
             "cap_msg".into(),
         )
     }
@@ -849,66 +859,85 @@ mod tests {
         }
     }
 
+    fn invoke(
+        middleware: &PrometheusMiddleware,
+        inv: &Invocation,
+        inv_response: &InvocationResponse,
+    ) {
+        middleware.actor_pre_invoke(inv.clone()).unwrap();
+        // simulate that the invocation takes some time
+        std::thread::sleep(Duration::from_millis(1));
+        middleware.actor_post_invoke(inv_response.clone()).unwrap();
+    }
+
     #[test]
     fn test_serve_metrics() -> Result<(), reqwest::Error> {
+        let actor_invocation1 = actor_invocation(ACTOR1, ACTOR_OPERATION1);
+        let actor_invocation2 = actor_invocation(ACTOR2, ACTOR_OPERATION2);
+        let actor_invocation1_response = invocation_response(&actor_invocation1.id);
+        let actor_invocation2_response = invocation_response(&actor_invocation2.id);
+
+        let cap_invocation1 = cap_invocation(CAPID1, BINDING1, CAP_OPERATION1);
+        let cap_invocation2 = cap_invocation(CAPID2, BINDING2, CAP_OPERATION2);
+        let cap_invocation1_response = invocation_response(&cap_invocation1.id);
+        let cap_invocation2_response = invocation_response(&cap_invocation2.id);
+
         let server_addr: SocketAddr = ([127, 0, 0, 1], 9898).into();
         let config = PrometheusConfig {
             metrics_server_addr: Some(server_addr),
             pushgateway_config: None,
             moving_average_window_size: None,
         };
-
         let middleware = PrometheusMiddleware::new(config).unwrap();
-        let actor_invocation = actor_invocation();
-        let actor_invocation_response = invocation_response(&actor_invocation.id);
-        let cap_invocation = cap_invocation();
-        let cap_invocation_response = invocation_response(&cap_invocation.id);
-        let invocations = random::<u8>();
 
-        for _ in 0..invocations {
-            middleware
-                .actor_pre_invoke(actor_invocation.clone())
-                .unwrap();
-            middleware.actor_pre_invoke(cap_invocation.clone()).unwrap();
+        let invocations_op1 = 5;
+        let invocations_op2 = 7;
 
-            // simulate that the invocation takes some time
-            std::thread::sleep(Duration::from_millis(1));
+        for _ in 0..invocations_op1 {
+            invoke(&middleware, &actor_invocation1, &actor_invocation1_response);
+            invoke(&middleware, &cap_invocation1, &cap_invocation1_response);
+        }
 
-            middleware
-                .actor_post_invoke(cap_invocation_response.clone())
-                .unwrap();
-            middleware
-                .actor_post_invoke(actor_invocation_response.clone())
-                .unwrap();
+        for _ in 0..invocations_op2 {
+            invoke(&middleware, &actor_invocation2, &actor_invocation2_response);
+            invoke(&middleware, &cap_invocation2, &cap_invocation2_response);
         }
 
         let url = format!("http://{}/metrics", &server_addr.to_string());
         let body = reqwest::blocking::get(&url)?.text()?;
 
-        // TODO Add helper function to get value from Gauge
+        let total_invocations = invocations_op1 + invocations_op2;
         // get average times directly from the middleware and assert they are served
-        let actor_total_average_time = &middleware
-            .metrics
-            .read()
-            .unwrap()
-            .actor_total_average_inv_time
-            .get();
         let cap_total_average_time = &middleware
             .metrics
             .read()
             .unwrap()
             .cap_total_average_inv_time
             .get();
+        let actor_total_average_time = &middleware
+            .metrics
+            .read()
+            .unwrap()
+            .actor_total_average_inv_time
+            .get();
 
-        // TODO Add assertions for all metrics
-
-        // capabilities
+        // capabilities: counts
         assert!(body
-            .find(&format!("cap_total_inv_count {}", invocations))
+            .find(&format!("cap_total_inv_count {}", total_invocations))
             .is_some());
         assert!(body
-            .find(&format!("{}_{}_inv_count {}", CAPID, BINDING, invocations))
+            .find(&format!(
+                "{}_{}_inv_count {}",
+                CAPID1, BINDING1, invocations_op1
+            ))
             .is_some());
+        assert!(body
+            .find(&format!(
+                "{}_{}_inv_count {}",
+                CAPID2, BINDING2, invocations_op2
+            ))
+            .is_some());
+        // capabilities: averages
         assert!(body
             .find(&format!(
                 "cap_total_average_inv_time {}",
@@ -916,30 +945,51 @@ mod tests {
             ))
             .is_some());
         assert!(body
+            .find(&format!("{}_{}_average_inv_time", CAPID1, BINDING1))
+            .is_some());
+        assert!(body
+            .find(&format!("{}_{}_average_inv_time", CAPID2, BINDING2))
+            .is_some());
+        // capabilities: averages for operations
+        assert!(body
             .find(&format!(
-                "{}_{}_average_inv_time {}",
-                CAPID, BINDING, cap_total_average_time
+                "{}_{}_{}_average_inv_time",
+                CAPID1, BINDING1, CAP_OPERATION1
+            ))
+            .is_some());
+        assert!(body
+            .find(&format!(
+                "{}_{}_{}_average_inv_time",
+                CAPID2, BINDING2, CAP_OPERATION2
             ))
             .is_some());
 
         // actors
         assert!(body
-            .find(&format!("actor_total_inv_count {}", invocations))
+            .find(&format!("actor_total_inv_count {}", total_invocations))
             .is_some());
         assert!(body
-            .find(&format!("{}_inv_count {}", TARGET_ACTOR, invocations))
+            .find(&format!("{}_inv_count {}", ACTOR1, invocations_op1))
             .is_some());
+        assert!(body
+            .find(&format!("{}_inv_count {}", ACTOR2, invocations_op2))
+            .is_some());
+        // TODO Lookup these averages from the gauges and improve asserts
+        // actors: averages
         assert!(body
             .find(&format!(
                 "actor_total_average_inv_time {}",
                 actor_total_average_time
             ))
             .is_some());
+        assert!(body.find(&format!("{}_average_inv_time", ACTOR1)).is_some());
+        assert!(body.find(&format!("{}_average_inv_time", ACTOR2)).is_some());
+        // actors: averages for operations
         assert!(body
-            .find(&format!(
-                "{}_average_inv_time {}",
-                TARGET_ACTOR, actor_total_average_time
-            ))
+            .find(&format!("{}_{}_average_inv_time", ACTOR1, ACTOR_OPERATION1))
+            .is_some());
+        assert!(body
+            .find(&format!("{}_{}_average_inv_time", ACTOR2, ACTOR_OPERATION2))
             .is_some());
 
         // check that invocation state is cleaned up
@@ -985,9 +1035,9 @@ mod tests {
         };
 
         let middleware = PrometheusMiddleware::new(config).unwrap();
-        let actor_invocation = actor_invocation();
+        let actor_invocation = actor_invocation(ACTOR1, ACTOR_OPERATION1);
         let actor_invocation_response = invocation_response(&actor_invocation.id);
-        let cap_invocation = cap_invocation();
+        let cap_invocation = cap_invocation(CAPID1, BINDING1, CAP_OPERATION1);
         let cap_invocation_response = invocation_response(&cap_invocation.id);
         let invocations = random::<u8>();
 
