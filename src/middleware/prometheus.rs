@@ -5,7 +5,7 @@
 //! by pushing metrics to the [Prometheus Pushgateway][prometheus_pushgateway]
 //! that is then scraped by [Prometheus][prometheus].
 //!
-//! Enable this middleware using the feature `prometheus_middleware`.
+//! Enable this middleware using the feature flag `prometheus_middleware`.
 //!
 //! ## Getting Started
 //!
@@ -24,6 +24,8 @@
 //!
 //! This will expose metrics at `http://127.0.0.1:9898/metrics`. This can be
 //! used as a scraping target in [Prometheus][prometheus].
+//!
+//! All metrics are prefixed with 'wascc_'.
 //!
 //! Here is a simple [Prometheus][prometheus] configuration that scrapes the above target and
 //! the [Prometheus Pushgateway][prometheus_pushgateway] (save the file as `prometheus.yml`):
@@ -101,6 +103,7 @@ use std::time::{Duration, Instant};
 
 // The default number of invocations to include when calculating average invocation times
 const DEFAULT_MOVING_AVERAGE_WINDOW_SIZE: i64 = 100;
+const WASCC: &str = "wascc";
 
 /// A Prometheus middleware that can serve or push metrics.
 pub struct PrometheusMiddleware {
@@ -257,27 +260,27 @@ impl PrometheusMiddleware {
     fn init_metrics(config: &PrometheusConfig) -> Result<Metrics> {
         Ok(Metrics {
             cap_total_inv_count: IntCounter::new(
-                "cap_total_inv_count",
-                "Total number of capability invocations",
+                format!("{}_cap_total_inv_count", WASCC),
+                "Total number of capability invocations".to_owned(),
             )?,
             cap_inv_count: HashMap::new(),
             cap_operation_inv_count: HashMap::new(),
             cap_total_average_inv_time: Gauge::new(
-                "cap_total_average_inv_time",
-                "Average invocation time across all capabilities",
+                format!("{}_cap_total_average_inv_time", WASCC),
+                "Average invocation time across all capabilities".to_owned(),
             )?,
             cap_average_inv_time: HashMap::new(),
             cap_operation_average_inv_time: HashMap::new(),
 
             actor_total_inv_count: IntCounter::new(
-                "actor_total_inv_count",
-                "Total number of actor invocations",
+                format!("{}_actor_total_inv_count", WASCC),
+                "Total number of actor invocations".to_owned(),
             )?,
             actor_inv_count: HashMap::new(),
             actor_operation_inv_count: HashMap::new(),
             actor_total_average_inv_time: Gauge::new(
-                "actor_total_average_inv_time",
-                "Average invocation time across all actors",
+                format!("{}_actor_total_average_inv_time", WASCC),
+                "Average invocation time across all actors".to_owned(),
             )?,
             actor_average_inv_time: HashMap::new(),
             actor_operation_average_inv_time: HashMap::new(),
@@ -345,7 +348,7 @@ fn pre_invoke_count_inv(
             if let Some(value) = metrics.actor_inv_count.get(&actor_key) {
                 value.inc();
             } else {
-                let name = format!("{}_inv_count", &actor);
+                let name = format!("{}_{}_inv_count", WASCC, &actor);
                 let help = format!("Number of invocations of actor '{}'", &actor);
                 register_counter(
                     &mut metrics.actor_inv_count,
@@ -360,7 +363,7 @@ fn pre_invoke_count_inv(
             if let Some(value) = metrics.actor_operation_inv_count.get(&actor_operation_key) {
                 value.inc();
             } else {
-                let name = format!("{}_{}_inv_count", &actor, &operation);
+                let name = format!("{}_{}_{}_inv_count", WASCC, &actor, &operation);
                 let help = format!(
                     "Number of invocations of operation '{}' on actor '{}'",
                     &operation, &actor
@@ -381,7 +384,7 @@ fn pre_invoke_count_inv(
             if let Some(value) = metrics.cap_inv_count.get(&cap_key) {
                 value.inc();
             } else {
-                let name = format!("{}_{}_inv_count", &capid, &binding);
+                let name = format!("{}_{}_{}_inv_count", WASCC, &capid, &binding);
                 let help = format!(
                     "Number of invocations of capability '{}' with binding '{}'",
                     &capid, &binding
@@ -393,7 +396,7 @@ fn pre_invoke_count_inv(
             if let Some(value) = metrics.cap_operation_inv_count.get(&cap_operation_key) {
                 value.inc();
             } else {
-                let name = format!("{}_{}_{}_inv_count", &capid, &binding, &operation);
+                let name = format!("{}_{}_{}_{}_inv_count", WASCC, &capid, &binding, &operation);
                 let help = format!(
                     "Number of invocations of operation '{}' on capability '{}' with binding '{}'",
                     &capid, &binding, &operation
@@ -490,22 +493,17 @@ fn post_invoke_measure_inv_time(
 
         // was an actor or a capability invoked?
         match &state.target {
-            // TODO Simplify this! Duplicated code...
             InvocationTarget::Actor(actor) => {
                 if let Some(gauge) = metrics.actor_average_inv_time.get(&state.metric_key) {
-                    let inv_count = metrics
-                        .actor_inv_count
-                        .get(&state.metric_key)
-                        .map(|c| c.get())
-                        .unwrap_or(1);
-                    gauge.set(calc_avg(
+                    set_gauge_avg(
+                        gauge,
+                        &metrics.actor_inv_count,
                         metrics.moving_average_window_size,
-                        inv_count,
                         inv_time,
-                        gauge.get(),
-                    ));
+                        &state.metric_key,
+                    );
                 } else {
-                    let name = format!("{}_average_inv_time", actor.clone());
+                    let name = format!("{}_{}_average_inv_time", WASCC, actor.clone());
                     let help = format!("Average time to invoke actor '{}'", actor.clone());
 
                     register_gauge(
@@ -522,19 +520,20 @@ fn post_invoke_measure_inv_time(
                     .actor_operation_average_inv_time
                     .get(&state.operation_metric_key)
                 {
-                    let inv_count = metrics
-                        .actor_operation_inv_count
-                        .get(&state.operation_metric_key)
-                        .map(|c| c.get())
-                        .unwrap_or(1);
-                    gauge.set(calc_avg(
+                    set_gauge_avg(
+                        gauge,
+                        &metrics.actor_operation_inv_count,
                         metrics.moving_average_window_size,
-                        inv_count,
                         inv_time,
-                        gauge.get(),
-                    ));
+                        &state.operation_metric_key,
+                    );
                 } else {
-                    let name = format!("{}_{}_average_inv_time", actor.clone(), &state.operation);
+                    let name = format!(
+                        "{}_{}_{}_average_inv_time",
+                        WASCC,
+                        actor.clone(),
+                        &state.operation
+                    );
                     let help = format!(
                         "Average time to invoke operation '{}' on actor '{}'",
                         &state.operation,
@@ -551,22 +550,17 @@ fn post_invoke_measure_inv_time(
                     );
                 }
             }
-            // TODO Simplify this! Duplicated code...
             InvocationTarget::Capability { capid, binding } => {
                 if let Some(gauge) = metrics.cap_average_inv_time.get(&state.metric_key) {
-                    let inv_count = metrics
-                        .cap_inv_count
-                        .get(&state.metric_key)
-                        .map(|c| c.get())
-                        .unwrap_or(1);
-                    gauge.set(calc_avg(
+                    set_gauge_avg(
+                        gauge,
+                        &metrics.cap_inv_count,
                         metrics.moving_average_window_size,
-                        inv_count,
                         inv_time,
-                        gauge.get(),
-                    ));
+                        &state.metric_key,
+                    );
                 } else {
-                    let name = format!("{}_{}_average_inv_time", capid, binding);
+                    let name = format!("{}_{}_{}_average_inv_time", WASCC, capid, binding);
                     let help = format!(
                         "Average time to invoke capability '{}' with binding '{}'",
                         capid, binding
@@ -586,21 +580,17 @@ fn post_invoke_measure_inv_time(
                     .cap_operation_average_inv_time
                     .get(&state.operation_metric_key)
                 {
-                    let inv_count = metrics
-                        .cap_operation_inv_count
-                        .get(&state.operation_metric_key)
-                        .map(|c| c.get())
-                        .unwrap_or(1);
-                    gauge.set(calc_avg(
+                    set_gauge_avg(
+                        gauge,
+                        &metrics.cap_operation_inv_count,
                         metrics.moving_average_window_size,
-                        inv_count,
                         inv_time,
-                        gauge.get(),
-                    ));
+                        &state.operation_metric_key,
+                    );
                 } else {
                     let name = format!(
-                        "{}_{}_{}_average_inv_time",
-                        capid, binding, &state.operation
+                        "{}_{}_{}_{}_average_inv_time",
+                        WASCC, capid, binding, &state.operation
                     );
                     let help = format!(
                         "Average time to invoke operation '{}' on capability '{}' with binding '{}'",
@@ -621,6 +611,22 @@ fn post_invoke_measure_inv_time(
     } else {
         error!("No active invocation with id '{}'", &response.invocation_id);
     }
+}
+
+fn set_gauge_avg(
+    gauge: &Gauge,
+    inv_count: &HashMap<String, IntCounter>,
+    moving_average_window_size: i64,
+    inv_time: u128,
+    metric_key: &str,
+) {
+    let inv_count = inv_count.get(metric_key).map(|c| c.get()).unwrap_or(1);
+    gauge.set(calc_avg(
+        moving_average_window_size,
+        inv_count,
+        inv_time,
+        gauge.get(),
+    ));
 }
 
 fn register_gauge(
@@ -763,9 +769,7 @@ fn push_metrics(
     push_config: PushgatewayConfig,
     mut push_kill_switch_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
-    let job = push_config
-        .job
-        .unwrap_or_else(|| String::from("wascc_push"));
+    let job = push_config.job.unwrap_or_else(|| WASCC.to_owned());
     let pushgateway_addr = &push_config.pushgateway_addr;
 
     loop {
@@ -808,6 +812,7 @@ fn push_metrics(
 
 #[cfg(test)]
 mod tests {
+    use super::WASCC;
     use crate::middleware::prometheus::{
         PrometheusConfig, PrometheusMiddleware, PushgatewayConfig,
     };
@@ -907,89 +912,97 @@ mod tests {
         let body = reqwest::blocking::get(&url)?.text()?;
 
         let total_invocations = invocations_op1 + invocations_op2;
-        // get average times directly from the middleware and assert they are served
-        let cap_total_average_time = &middleware
-            .metrics
-            .read()
-            .unwrap()
-            .cap_total_average_inv_time
-            .get();
-        let actor_total_average_time = &middleware
-            .metrics
-            .read()
-            .unwrap()
-            .actor_total_average_inv_time
-            .get();
 
         // capabilities: counts
         assert!(body
-            .find(&format!("cap_total_inv_count {}", total_invocations))
-            .is_some());
-        assert!(body
             .find(&format!(
-                "{}_{}_inv_count {}",
-                CAPID1, BINDING1, invocations_op1
+                "{}_cap_total_inv_count {}",
+                WASCC, total_invocations
             ))
             .is_some());
         assert!(body
             .find(&format!(
-                "{}_{}_inv_count {}",
-                CAPID2, BINDING2, invocations_op2
+                "{}_{}_{}_inv_count {}",
+                WASCC, CAPID1, BINDING1, invocations_op1
+            ))
+            .is_some());
+        assert!(body
+            .find(&format!(
+                "{}_{}_{}_inv_count {}",
+                WASCC, CAPID2, BINDING2, invocations_op2
             ))
             .is_some());
         // capabilities: averages
         assert!(body
+            .find(&format!("{}_cap_total_average_inv_time", WASCC))
+            .is_some());
+        assert!(body
             .find(&format!(
-                "cap_total_average_inv_time {}",
-                cap_total_average_time
+                "{}_{}_{}_average_inv_time",
+                WASCC, CAPID1, BINDING1
             ))
             .is_some());
         assert!(body
-            .find(&format!("{}_{}_average_inv_time", CAPID1, BINDING1))
-            .is_some());
-        assert!(body
-            .find(&format!("{}_{}_average_inv_time", CAPID2, BINDING2))
+            .find(&format!(
+                "{}_{}_{}_average_inv_time",
+                WASCC, CAPID2, BINDING2
+            ))
             .is_some());
         // capabilities: averages for operations
         assert!(body
             .find(&format!(
-                "{}_{}_{}_average_inv_time",
-                CAPID1, BINDING1, CAP_OPERATION1
+                "{}_{}_{}_{}_average_inv_time",
+                WASCC, CAPID1, BINDING1, CAP_OPERATION1
             ))
             .is_some());
         assert!(body
             .find(&format!(
-                "{}_{}_{}_average_inv_time",
-                CAPID2, BINDING2, CAP_OPERATION2
+                "{}_{}_{}_{}_average_inv_time",
+                WASCC, CAPID2, BINDING2, CAP_OPERATION2
             ))
             .is_some());
 
         // actors
         assert!(body
-            .find(&format!("actor_total_inv_count {}", total_invocations))
-            .is_some());
-        assert!(body
-            .find(&format!("{}_inv_count {}", ACTOR1, invocations_op1))
-            .is_some());
-        assert!(body
-            .find(&format!("{}_inv_count {}", ACTOR2, invocations_op2))
-            .is_some());
-        // TODO Lookup these averages from the gauges and improve asserts
-        // actors: averages
-        assert!(body
             .find(&format!(
-                "actor_total_average_inv_time {}",
-                actor_total_average_time
+                "{}_actor_total_inv_count {}",
+                WASCC, total_invocations
             ))
             .is_some());
-        assert!(body.find(&format!("{}_average_inv_time", ACTOR1)).is_some());
-        assert!(body.find(&format!("{}_average_inv_time", ACTOR2)).is_some());
-        // actors: averages for operations
         assert!(body
-            .find(&format!("{}_{}_average_inv_time", ACTOR1, ACTOR_OPERATION1))
+            .find(&format!(
+                "{}_{}_inv_count {}",
+                WASCC, ACTOR1, invocations_op1
+            ))
             .is_some());
         assert!(body
-            .find(&format!("{}_{}_average_inv_time", ACTOR2, ACTOR_OPERATION2))
+            .find(&format!(
+                "{}_{}_inv_count {}",
+                WASCC, ACTOR2, invocations_op2
+            ))
+            .is_some());
+        // actors: averages
+        assert!(body
+            .find(&format!("actor_total_average_inv_time"))
+            .is_some());
+        assert!(body
+            .find(&format!("{}_{}_average_inv_time", WASCC, ACTOR1,))
+            .is_some());
+        assert!(body
+            .find(&format!("{}_{}_average_inv_time", WASCC, ACTOR2))
+            .is_some());
+        // actors: averages for operations
+        assert!(body
+            .find(&format!(
+                "{}_{}_{}_average_inv_time",
+                WASCC, ACTOR1, ACTOR_OPERATION1
+            ))
+            .is_some());
+        assert!(body
+            .find(&format!(
+                "{}_{}_{}_average_inv_time",
+                WASCC, ACTOR2, ACTOR_OPERATION2
+            ))
             .is_some());
 
         // check that invocation state is cleaned up
@@ -1000,8 +1013,6 @@ mod tests {
             .active_inv_state
             .is_empty());
 
-        // std::thread::sleep(Duration::from_secs(78478948));
-
         Ok(())
     }
 
@@ -1010,7 +1021,7 @@ mod tests {
         // The data format that is used is not compatible with any current Mockito
         // matcher. It doesn't currently seem to be possible to get the raw body in
         // a matcher, see https://github.com/lipanski/mockito/issues/95
-        let pushed_metrics = mock("PUT", "/metrics/job/wascc_push")
+        let pushed_metrics = mock("PUT", "/metrics/job/wascc")
             .match_header("content-type", "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited")
             .match_header("content-length", Matcher::Any)
             .match_header("accept", "*/*")
