@@ -39,7 +39,8 @@
 //!   - job_name: "wascc"
 //!     scrape_interval: 5s
 //!     honor_labels: true
-//!     # Scrape waSCC. 'host.docker.internal' points to the host
+//!     # Scrape waSCC.
+//!     # 'host.docker.internal' points to the host on Win and Mac.
 //!     static_configs:
 //!       - targets: ["host.docker.internal:9898"]
 //!   - job_name: "pushgateway"
@@ -267,7 +268,7 @@ impl PrometheusMiddleware {
             cap_operation_inv_count: HashMap::new(),
             cap_total_average_inv_time: Gauge::new(
                 format!("{}_cap_total_average_inv_time", WASCC),
-                "Average invocation time across all capabilities".to_owned(),
+                "Average invocation time (ms) across all capabilities".to_owned(),
             )?,
             cap_average_inv_time: HashMap::new(),
             cap_operation_average_inv_time: HashMap::new(),
@@ -280,7 +281,7 @@ impl PrometheusMiddleware {
             actor_operation_inv_count: HashMap::new(),
             actor_total_average_inv_time: Gauge::new(
                 format!("{}_actor_total_average_inv_time", WASCC),
-                "Average invocation time across all actors".to_owned(),
+                "Average invocation time (ms) across all actors".to_owned(),
             )?,
             actor_average_inv_time: HashMap::new(),
             actor_operation_average_inv_time: HashMap::new(),
@@ -504,7 +505,7 @@ fn post_invoke_measure_inv_time(
                     );
                 } else {
                     let name = format!("{}_{}_average_inv_time", WASCC, actor.clone());
-                    let help = format!("Average time to invoke actor '{}'", actor.clone());
+                    let help = format!("Average time (ms) to invoke actor '{}'", actor.clone());
 
                     register_gauge(
                         registry,
@@ -535,7 +536,7 @@ fn post_invoke_measure_inv_time(
                         &state.operation
                     );
                     let help = format!(
-                        "Average time to invoke operation '{}' on actor '{}'",
+                        "Average time (ms) to invoke operation '{}' on actor '{}'",
                         &state.operation,
                         actor.clone()
                     );
@@ -562,7 +563,7 @@ fn post_invoke_measure_inv_time(
                 } else {
                     let name = format!("{}_{}_{}_average_inv_time", WASCC, capid, binding);
                     let help = format!(
-                        "Average time to invoke capability '{}' with binding '{}'",
+                        "Average time (ms) to invoke capability '{}' with binding '{}'",
                         capid, binding
                     );
 
@@ -593,7 +594,7 @@ fn post_invoke_measure_inv_time(
                         WASCC, capid, binding, &state.operation
                     );
                     let help = format!(
-                        "Average time to invoke operation '{}' on capability '{}' with binding '{}'",
+                        "Average time (ms) to invoke operation '{}' on capability '{}' with binding '{}'",
                         &state.operation, capid, binding
                     );
 
