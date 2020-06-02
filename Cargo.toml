@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.7.2"
+version = "0.7.3"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
