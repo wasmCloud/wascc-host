@@ -18,6 +18,9 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use wapc::WapcHost;
 
+#[cfg(feature = "prometheus_middleware")]
+pub mod prometheus;
+
 /// The trait that must be implemented by all waSCC middleware
 pub trait Middleware: Send + Sync + 'static {
     fn actor_pre_invoke(&self, inv: Invocation) -> Result<Invocation>;

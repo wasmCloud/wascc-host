@@ -89,6 +89,9 @@ pub use inthost::{Invocation, InvocationResponse, InvocationTarget};
 #[cfg(feature = "manifest")]
 pub use manifest::{BindingEntry, HostManifest};
 
+#[cfg(feature = "prometheus_middleware")]
+pub use middleware::prometheus;
+
 pub use middleware::Middleware;
 pub use wapc::prelude::WasiParams;
 
@@ -103,7 +106,7 @@ mod inthost;
 #[cfg(feature = "manifest")]
 mod manifest;
 
-mod middleware;
+pub mod middleware;
 mod plugins;
 mod router;
 
