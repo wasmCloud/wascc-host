@@ -1071,7 +1071,8 @@ mod tests {
         }
 
         // make sure at least one push has time to complete before asserting
-        std::thread::sleep(push_interval.mul(2));
+        // this test fails intermittently with a interval * 2
+        std::thread::sleep(push_interval.mul(3));
 
         pushed_metrics.assert();
         // check that invocation state is cleaned up
