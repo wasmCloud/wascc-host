@@ -3,6 +3,7 @@
 // generating a guid, and generating a sequence number... things that a standalone
 // WASM module cannot do.
 
+use crate::{REVISION, VERSION};
 use std::error::Error;
 use std::sync::{Arc, RwLock};
 use std::{
@@ -10,7 +11,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use uuid::Uuid;
-use wascc_codec::capabilities::{CapabilityProvider, Dispatcher, NullDispatcher};
+use wascc_codec::capabilities::{
+    CapabilityDescriptor, CapabilityProvider, Dispatcher, NullDispatcher, OperationDirection,
+    OP_GET_CAPABILITY_DESCRIPTOR,
+};
 use wascc_codec::extras::*;
 use wascc_codec::{deserialize, serialize};
 
@@ -90,6 +94,35 @@ impl ExtrasCapabilityProvider {
         };
         Ok(serialize(&result)?)
     }
+
+    fn get_descriptor(&self) -> Result<Vec<u8>, Box<dyn Error>> {
+        Ok(serialize(
+            CapabilityDescriptor::builder()
+                .id(CAPABILITY_ID)
+                .name("waSCC Extras (Internal)")
+                .long_description(
+                    "A capability provider exposing miscellaneous utility functions to actors",
+                )
+                .version(VERSION)
+                .revision(REVISION)
+                .with_operation(
+                    OP_REQUEST_GUID,
+                    OperationDirection::ToProvider,
+                    "Requests the generation of a new GUID",
+                )
+                .with_operation(
+                    OP_REQUEST_RANDOM,
+                    OperationDirection::ToProvider,
+                    "Requests the generation of a randum number",
+                )
+                .with_operation(
+                    OP_REQUEST_SEQUENCE,
+                    OperationDirection::ToProvider,
+                    "Requests the next number in a process-wide global sequence number",
+                )
+                .build(),
+        )?)
+    }
 }
 
 impl CapabilityProvider for ExtrasCapabilityProvider {
@@ -104,14 +137,6 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
         Ok(())
     }
 
-    fn capability_id(&self) -> &'static str {
-        CAPABILITY_ID
-    }
-
-    fn name(&self) -> &'static str {
-        "waSCC Extras"
-    }
-
     fn handle_call(
         &self,
         actor: &str,
@@ -121,6 +146,7 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
         trace!("Received host call from {}, operation - {}", actor, op);
 
         match op {
+            OP_GET_CAPABILITY_DESCRIPTOR if actor == "system" => self.get_descriptor(),
             OP_REQUEST_GUID => self.generate_guid(actor, deserialize(msg)?),
             OP_REQUEST_RANDOM => self.generate_random(actor, deserialize(msg)?),
             OP_REQUEST_SEQUENCE => self.generate_sequence(actor, deserialize(msg)?),

@@ -16,28 +16,18 @@ use crate::Result;
 use libloading::Library;
 use libloading::Symbol;
 use std::ffi::OsStr;
-use wascc_codec::capabilities::CapabilityProvider;
-
-/// Provides a summary of a registered capability provider
-#[derive(Debug, Clone, PartialEq)]
-pub struct CapabilitySummary {
-    /// The human-readable name of the capability provider
-    pub name: String,
-    /// The capability ID (namespace) of the provider
-    pub id: String,
-    /// The binding name for the provider (default is "default")
-    pub binding: String,
-    /// Indicates whether the capability provider is portable (WASI module)
-    pub portable: bool,
-}
+use wascc_codec::{
+    capabilities::{CapabilityDescriptor, CapabilityProvider, OP_GET_CAPABILITY_DESCRIPTOR},
+    deserialize,
+};
 
 /// Represents a native capability provider compiled as a shared object library.
 /// These plugins are OS- and architecture-specific, so they will be `.so` files on Linux, `.dylib`
 /// files on macOS, etc.
 pub struct NativeCapability {
-    pub(crate) capid: String,
     pub(crate) plugin: Box<dyn CapabilityProvider>,
     pub(crate) binding_name: String,
+    pub(crate) descriptor: CapabilityDescriptor,
     // This field is solely used to keep the FFI library instance allocated for the same
     // lifetime as the boxed plugin
     #[allow(dead_code)]
@@ -59,17 +49,17 @@ impl NativeCapability {
 
             Box::from_raw(boxed_raw)
         };
+        let descriptor = get_descriptor(&plugin)?;
+        let binding = binding_name.unwrap_or("default".to_string());
         info!(
-            "Loaded capability: {}, native provider: {}",
-            plugin.capability_id(),
-            plugin.name()
+            "Loaded native capability provider '{}' v{} ({}) for {}/{}",
+            descriptor.name, descriptor.version, descriptor.revision, descriptor.id, binding
         );
 
-        let capid = plugin.capability_id().to_string();
         Ok(NativeCapability {
-            capid,
             plugin,
-            binding_name: binding_name.unwrap_or("default".to_string()),
+            descriptor,
+            binding_name: binding,
             library: Some(library),
         })
     }
@@ -83,22 +73,40 @@ impl NativeCapability {
         instance: impl CapabilityProvider,
         binding_name: Option<String>,
     ) -> Result<Self> {
-        let capid = instance.capability_id();
+        let b: Box<dyn CapabilityProvider> = Box::new(instance);
+        let descriptor = get_descriptor(&b)?;
+        let binding = binding_name.unwrap_or("default".to_string());
+
+        info!(
+            "Loaded native capability provider '{}' v{} ({}) for {}/{}",
+            descriptor.name, descriptor.version, descriptor.revision, descriptor.id, binding
+        );
         Ok(NativeCapability {
-            capid: capid.to_string(),
-            plugin: Box::new(instance),
-            binding_name: binding_name.unwrap_or("default".to_string()),
+            descriptor,
+            plugin: b,
+            binding_name: binding,
             library: None,
         })
     }
 
     /// Returns the capability ID (namespace) of the provider
     pub fn id(&self) -> String {
-        self.capid.to_string()
+        self.descriptor.id.to_string()
     }
 
     /// Returns the human-friendly name of the provider
     pub fn name(&self) -> String {
-        self.plugin.name().to_string()
+        self.descriptor.name.to_string()
     }
+
+    /// Returns the full descriptor for the capability provider
+    pub fn descriptor(&self) -> &CapabilityDescriptor {
+        &self.descriptor
+    }
+}
+
+fn get_descriptor(plugin: &Box<dyn CapabilityProvider>) -> Result<CapabilityDescriptor> {
+    let res = plugin.handle_call("system", OP_GET_CAPABILITY_DESCRIPTOR, &[])?;
+    let descriptor: CapabilityDescriptor = deserialize(&res)?;
+    Ok(descriptor)
 }

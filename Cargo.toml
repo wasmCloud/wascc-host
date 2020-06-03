@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.7.3"
+version = "0.8.0"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -28,7 +28,7 @@ prometheus = { version = "0.9", features = ["push"], optional = true }
 hyper = { version = "0.13", optional = true }
 tokio = { version = "0.2", features = ["macros"], optional = true }
 wapc = "0.7.2"
-wascc-codec = "0.6.0"
+wascc-codec = "0.7.0"
 wascap = "0.4.5"
 log = "0.4.8"
 rand = "0.7.3"
@@ -36,7 +36,7 @@ env_logger = "0.7.1"
 
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
-gantryclient = { version = "0.0.6", optional = true }
+gantryclient = { version = "0.0.7", optional = true }
 
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.12", optional = true }

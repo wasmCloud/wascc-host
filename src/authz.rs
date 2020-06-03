@@ -51,17 +51,12 @@ pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token<wascap::jw
     let token = wascap::wasm::extract_claims(buf)?;
     match token {
         Some(token) => {
+            let claims = token.claims.clone();
+            let caps = claims.metadata.as_ref().unwrap().caps.clone();
             info!(
-                "Discovered capability attestations: {}",
-                token
-                    .claims
-                    .metadata
-                    .as_ref()
-                    .unwrap()
-                    .caps
-                    .clone()
-                    .unwrap()
-                    .join(",")
+                "Discovered capability attestations for actor {}: {}",
+                &claims.subject,
+                caps.unwrap_or(vec![]).join(",")
             );
             Ok(token)
         }

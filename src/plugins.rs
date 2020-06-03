@@ -83,11 +83,12 @@ impl PluginManager {
     }
 
     pub fn add_plugin(&mut self, plugin: NativeCapability) -> Result<()> {
-        let key = route_key(&plugin.binding_name, &plugin.capid);
+        let key = route_key(&plugin.binding_name, &plugin.id());
         if self.plugins.contains_key(&key) {
             Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Duplicate capability ID attempted to register provider: ({},{})",
-                plugin.binding_name, plugin.capid
+                plugin.binding_name,
+                plugin.id()
             ))))
         } else {
             self.plugins.insert(key, plugin);
