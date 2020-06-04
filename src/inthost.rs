@@ -19,7 +19,7 @@ use wascap::jwt::Claims;
 use wascc_codec::{
     capabilities::{CapabilityDescriptor, OP_GET_CAPABILITY_DESCRIPTOR},
     core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
-    deserialize, serialize,
+    deserialize, serialize, SYSTEM_ACTOR,
 };
 pub(crate) const ACTOR_BINDING: &str = "__actor__"; // A marker namespace for looking up the route to an actor's dispatcher
 
@@ -337,7 +337,7 @@ fn live_update(guest: &mut WapcHost, inv: &Invocation) -> InvocationResponse {
 
 fn gen_liveupdate_invocation(target: &str, bytes: Vec<u8>) -> Invocation {
     Invocation::new(
-        "system".to_string(),
+        SYSTEM_ACTOR.to_string(),
         InvocationTarget::Actor(target.to_string()),
         OP_PERFORM_LIVE_UPDATE,
         bytes,
@@ -386,7 +386,7 @@ fn remove_binding(bindings: Arc<RwLock<BindingsList>>, actor: &str, binding: &st
 
 fn gen_remove_actor(msg: Vec<u8>, binding: &str, capid: &str) -> Invocation {
     Invocation::new(
-        "system".to_string(),
+        SYSTEM_ACTOR.to_string(),
         InvocationTarget::Capability {
             capid: capid.to_string(),
             binding: binding.to_string(),
@@ -541,7 +541,7 @@ pub(crate) fn gen_config_invocation(
     };
     let payload = serialize(&cfgvals).unwrap();
     Invocation::new(
-        "system".to_string(),
+        SYSTEM_ACTOR.to_string(),
         InvocationTarget::Capability {
             capid: capid.to_string(),
             binding,
