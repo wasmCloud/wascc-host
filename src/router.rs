@@ -96,7 +96,7 @@ impl Router {
                 key
             ))))
         }
-    }    
+    }
 }
 
 pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {

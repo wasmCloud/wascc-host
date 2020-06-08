@@ -81,9 +81,12 @@ extern crate log;
 #[macro_use]
 extern crate crossbeam;
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const REVISION: u32 = 2;
+
 pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
-pub use capability::{CapabilitySummary, NativeCapability};
+pub use capability::NativeCapability;
 pub use inthost::{Invocation, InvocationResponse, InvocationTarget};
 
 #[cfg(feature = "manifest")]
@@ -122,6 +125,7 @@ use std::{
 };
 use wascap::jwt::{Claims, Token};
 use wascc_codec::{
+    capabilities::CapabilityDescriptor,
     core::{CapabilityConfiguration, OP_BIND_ACTOR},
     serialize,
 };
@@ -136,7 +140,7 @@ pub struct WasccHost {
     plugins: Arc<RwLock<PluginManager>>,
     auth_hook: Arc<RwLock<Option<Box<AuthHook>>>>,
     bindings: Arc<RwLock<BindingsList>>,
-    caps: Arc<RwLock<Vec<CapabilitySummary>>>,
+    caps: Arc<RwLock<HashMap<router::RouteKey, CapabilityDescriptor>>>,
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
     #[cfg(feature = "gantry")]
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
@@ -152,7 +156,7 @@ impl WasccHost {
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             auth_hook: Arc::new(RwLock::new(None)),
             bindings: Arc::new(RwLock::new(vec![])),
-            caps: Arc::new(RwLock::new(vec![])),
+            caps: Arc::new(RwLock::new(HashMap::new())),
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
         };
@@ -164,7 +168,7 @@ impl WasccHost {
             auth_hook: Arc::new(RwLock::new(None)),
             bindings: Arc::new(RwLock::new(vec![])),
             middlewares: Arc::new(RwLock::new(vec![])),
-            caps: Arc::new(RwLock::new(vec![])),
+            caps: Arc::new(RwLock::new(HashMap::new())),
         };
         host.ensure_extras().unwrap();
         host
@@ -242,36 +246,15 @@ impl WasccHost {
         self.add_actor(Actor::from_bytes(vec.clone())?)
     }
 
-    /// Adds a portable capability provider (WASI actor) to the waSCC host
+    /// Adds a portable capability provider (e.g. a WASI actor) to the waSCC host
     pub fn add_capability(
         &self,
         actor: Actor,
         binding: Option<&str>,
         wasi: WasiParams,
     ) -> Result<()> {
-        let token = authz::extract_claims(&actor.bytes)?;
-        let capid = token.claims.metadata.unwrap().caps.unwrap()[0].clone();
         let binding = binding.unwrap_or("default");
-        if self.router.read().unwrap().route_exists(&binding, &capid) {
-            return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
-                "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, 
-                binding)
-            )));
-        }
-        let claims = actor.token.claims.clone();
-        let summary = CapabilitySummary {
-            id: capid.clone(),
-            name: claims
-                .metadata
-                .unwrap()
-                .name
-                .unwrap_or(capid.clone())
-                .to_string(),
-            binding: binding.to_string(),
-            portable: true,
-        };
-        self.caps.write().unwrap().push(summary);
-        info!("Adding portable capability to host: {},{}", binding, capid);
+
         let wg = crossbeam_utils::sync::WaitGroup::new();
         self.spawn_actor_and_listen(
             wg.clone(),
@@ -320,7 +303,7 @@ impl WasccHost {
     /// Adds a native capability provider plugin to the waSCC runtime. Note that because these capabilities are native,
     /// cross-platform support is not always guaranteed.
     pub fn add_native_capability(&self, capability: NativeCapability) -> Result<()> {
-        let capid = capability.capid.clone();
+        let capid = capability.id();
         if self
             .router
             .read()
@@ -331,14 +314,15 @@ impl WasccHost {
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name                
             ))));
         }
-        let summary = CapabilitySummary {
-            id: capid.clone(),
-            name: capability.name(),
-            binding: capability.binding_name.to_string(),
-            portable: false,
-        };
+        self.caps.write().unwrap().insert(
+            (
+                capability.binding_name.to_string(),
+                capability.descriptor.id.to_string(),
+            ),
+            capability.descriptor().clone(),
+        );
         let wg = crossbeam_utils::sync::WaitGroup::new();
-        self.spawn_capability_provider_and_listen(capability, summary, wg.clone())?;
+        self.spawn_capability_provider_and_listen(capability, wg.clone())?;
         wg.wait();
         Ok(())
     }
@@ -502,8 +486,8 @@ impl WasccHost {
     }
 
     /// Returns the list of capability providers registered in the host
-    pub fn capabilities(&self) -> Vec<CapabilitySummary> {
+    pub fn capabilities(&self) -> HashMap<(String, String), CapabilityDescriptor> {
         let lock = self.caps.read().unwrap();
-        lock.iter().cloned().collect()
+        lock.clone()
     }
 }
