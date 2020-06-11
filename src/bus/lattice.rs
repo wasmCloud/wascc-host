@@ -95,12 +95,12 @@ fn get_env(var: &str, default: &str) -> String {
 }
 
 fn get_connection() -> nats::Connection {
+    let host = get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST);
+    let opts = nats::ConnectionOptions::new().with_name("waSCC Lattice");
     if let Some(creds) = get_credsfile() {
-        nats::ConnectionOptions::new()
-            .with_credentials(creds)
-            .connect(&get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST))
+        opts.with_credentials(creds).connect(&host)
     } else {
-        nats::ConnectionOptions::new().connect(&get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST))
+        opts.connect(&host)
     }
     .unwrap()
 }
