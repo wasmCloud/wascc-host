@@ -1,10 +1,15 @@
 use crate::{Invocation, InvocationResponse, Result};
-
 use crossbeam::{Receiver, Sender};
 use nats;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use wascc_codec::{deserialize, serialize};
+
+const LATTICE_HOST_KEY: &str = "LATTICE_HOST"; // env var name
+const DEFAULT_LATTICE_HOST: &str = "127.0.0.1";
+const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
+const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 500;
 
 pub(crate) struct DistributedBus {
     nc: nats::Connection,
@@ -13,7 +18,7 @@ pub(crate) struct DistributedBus {
 
 impl DistributedBus {
     pub fn new() -> Self {
-        let nc = nats::connect("127.0.0.1").unwrap();
+        let nc = nats::connect(&get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST)).unwrap();
         info!("Initialized Message Bus (lattice)");
         DistributedBus {
             nc,
@@ -39,7 +44,9 @@ impl DistributedBus {
     }
 
     pub fn invoke(&self, subject: &str, inv: Invocation) -> Result<InvocationResponse> {
-        let resp = self.nc.request(&subject, &serialize(inv)?)?;
+        let resp = self
+            .nc
+            .request_timeout(&subject, &serialize(inv)?, get_timeout())?;
         let ir: InvocationResponse = deserialize(&resp.data)?;
         Ok(ir)
     }
@@ -66,4 +73,30 @@ fn handle_invocation(
 fn invocation_from_msg(msg: &nats::Message) -> Invocation {
     let i: Invocation = deserialize(&msg.data).unwrap();
     i
+}
+
+fn get_env(var: &str, default: &str) -> String {
+    match std::env::var(var) {
+        Ok(val) => {
+            if val.is_empty() {
+                default.to_string()
+            } else {
+                val.to_string()
+            }
+        }
+        Err(_) => default.to_string(),
+    }
+}
+
+fn get_timeout() -> Duration {
+    match std::env::var(LATTICE_RPC_TIMEOUT_KEY) {
+        Ok(val) => {
+            if val.is_empty() {
+                Duration::from_millis(DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS)
+            } else {
+                Duration::from_millis(val.parse().unwrap_or(DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS))
+            }
+        }
+        Err(_) => Duration::from_millis(DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS),
+    }
 }
