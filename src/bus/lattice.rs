@@ -15,6 +15,7 @@ const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
 pub(crate) struct DistributedBus {
     nc: nats::Connection,
     subs: Arc<RwLock<HashMap<String, nats::subscription::Handler>>>,
+    req_timeout: Duration,
 }
 
 impl DistributedBus {
@@ -25,6 +26,7 @@ impl DistributedBus {
         DistributedBus {
             nc,
             subs: Arc::new(RwLock::new(HashMap::new())),
+            req_timeout: get_timeout(),
         }
     }
 
@@ -48,7 +50,7 @@ impl DistributedBus {
     pub fn invoke(&self, subject: &str, inv: Invocation) -> Result<InvocationResponse> {
         let resp = self
             .nc
-            .request_timeout(&subject, &serialize(inv)?, get_timeout())?;
+            .request_timeout(&subject, &serialize(inv)?, self.req_timeout)?;
         let ir: InvocationResponse = deserialize(&resp.data)?;
         Ok(ir)
     }
