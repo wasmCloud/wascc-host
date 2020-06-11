@@ -30,16 +30,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2 
-        name: Run tests Gantry+Manifest
-        run: cargo test --verbose --features "manifest gantry bin"
-      - uses: actions/checkout@v2 
-        name: Run tests (manifest only)
-        run: cargo test --verbose --features "manifest"
-      - uses: actions/checkout@v2         
-        name: Run tests (gantry only)
-        run: cargo test --verbose --features "gantry"
-      - uses: actions/checkout@v2 
-        name: Run tests (lattice mode)
+      - name: Run tests Gantry+Manifest
+        run: cargo test --verbose --features "manifest gantry bin"      
+      - name: Run tests (manifest only)
+        run: cargo test --verbose --features "manifest"      
+      - name: Run tests (gantry only)
+        run: cargo test --verbose --features "gantry"      
+      - name: Run tests (lattice mode)
         run: cargo test --verbose --features "manifest lattice"
         env:
           LATTICE_HOST: 0.0.0.0
