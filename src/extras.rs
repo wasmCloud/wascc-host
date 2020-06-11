@@ -15,6 +15,7 @@ use wascc_codec::capabilities::{
     CapabilityDescriptor, CapabilityProvider, Dispatcher, NullDispatcher, OperationDirection,
     OP_GET_CAPABILITY_DESCRIPTOR,
 };
+use wascc_codec::core::OP_BIND_ACTOR;
 use wascc_codec::extras::*;
 use wascc_codec::{deserialize, serialize};
 
@@ -150,6 +151,7 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
             OP_REQUEST_GUID => self.generate_guid(actor, deserialize(msg)?),
             OP_REQUEST_RANDOM => self.generate_random(actor, deserialize(msg)?),
             OP_REQUEST_SEQUENCE => self.generate_sequence(actor, deserialize(msg)?),
+            OP_BIND_ACTOR => Ok(vec![]),
             _ => Err("bad dispatch".into()),
         }
     }

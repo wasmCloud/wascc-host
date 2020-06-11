@@ -3,16 +3,14 @@
 use super::WasccHost;
 use crate::Result;
 
+use crate::bus;
+use crate::bus::MessageBus;
 use crate::BindingsList;
-use crate::{authz, errors, middleware, router, Actor, NativeCapability};
-use crate::{dispatch::WasccNativeDispatcher, plugins::PluginManager, Middleware};
-use crossbeam::{Receiver, Sender};
-use crossbeam_channel as channel;
-use crossbeam_utils::sync::WaitGroup;
-use router::Router;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::thread;
+use crate::{authz, errors, Actor, NativeCapability};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 use uuid::Uuid;
 use wapc::prelude::*;
 use wascap::jwt::Claims;
@@ -21,141 +19,23 @@ use wascc_codec::{
     core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
     deserialize, serialize, SYSTEM_ACTOR,
 };
-pub(crate) const ACTOR_BINDING: &str = "__actor__"; // A marker namespace for looking up the route to an actor's dispatcher
+
+pub(crate) fn unsub_all_bindings(
+    bindings: Arc<RwLock<BindingsList>>,
+    bus: Arc<MessageBus>,
+    capid: &str,
+) {
+    bindings
+        .read()
+        .unwrap()
+        .iter()
+        .filter(|(_a, c, _b)| c == capid)
+        .for_each(|(a, c, b)| {
+            let _ = bus.unsubscribe(&bus::provider_subject_bound_actor(c, b, a));
+        });
+}
 
 impl WasccHost {
-    /// Spawns a new thread, inside which we create an instance of the wasm module interpreter. This function
-    /// handles incoming calls _targeted at_ either an actor module or a portable capability provider (both are wapc hosts under the hood).
-    pub(crate) fn spawn_actor_and_listen(
-        &self,
-        wg: WaitGroup,
-        claims: Claims<wascap::jwt::Actor>,
-        buf: Vec<u8>,
-        wasi: Option<WasiParams>,
-        actor: bool,
-        binding: String,
-    ) -> Result<()> {
-        // This absurdly long dumpster 🗑️ of ceremony just sets up all the references
-        // we need to safely hand to the background thread, since you can't pass
-        // "self" as a reference down into that thread.
-        let claims_map = self.claims.clone();
-        let map2 = claims_map.clone();
-        let claims = claims.clone();
-        let c2 = claims.clone();
-        let router = self.router.clone();
-        let r2 = router.clone();
-        let plugins = self.plugins.clone();
-        let bindings = self.bindings.clone();
-        let middlewares = self.middlewares.clone();
-        let mids = middlewares.clone();
-        let caps = self.caps.clone();
-
-        thread::spawn(move || {
-            info!(
-                "Loading {} module...",
-                if actor {
-                    "actor"
-                } else {
-                    "portable capability"
-                }
-            );
-            let c = claims.clone();
-            authz::register_claims(claims_map, &claims.subject, c.clone());
-            let mut guest = WapcHost::new(
-                move |_id, bd, ns, op, payload| {
-                    host_callback(
-                        claims.clone(),
-                        router.clone(),
-                        plugins.clone(),
-                        middlewares.clone(),
-                        bd,
-                        ns,
-                        op,
-                        payload,
-                    )
-                },
-                &buf,
-                wasi,
-            )
-            .unwrap();
-            // Routing key for cap providers is their capID, subject for actors
-            let route_key = {
-                if !actor {
-                    match get_descriptor(&mut guest) {
-                        Ok(d) => {
-                            let result = d.id.to_string();
-                            if r2.clone().read().unwrap().route_exists(&binding, &result) {
-                                error!(
-                                    "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", &result, 
-                                    binding);
-                                return "".to_string();
-                            }
-                            info!(
-                                "Loaded portable capability provider '{}' v{} ({}) for {}/{}",
-                                d.name, d.version, d.revision, d.id, binding
-                            );
-
-                            caps.write()
-                                .unwrap()
-                                .insert((binding.to_string(), d.id.to_string()), d);
-                            result
-                        }
-                        Err(e) => {
-                            error!("Failed to load descriptor from portable provider: {}", e);
-                            "".to_string()
-                        }
-                    }
-                } else {
-                    route_key(&c)
-                }
-            };
-            if route_key.is_empty() {
-                return "Failed to load module".to_string();
-            }
-            let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
-            let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
-                channel::unbounded();
-            let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
-
-            if actor {
-                r2.write()
-                    .unwrap()
-                    .add_route(ACTOR_BINDING, &route_key, inv_s, resp_r, term_s);
-            } else {
-                r2.write()
-                    .unwrap()
-                    .add_route(&binding, &route_key, inv_s, resp_r, term_s);
-            }
-
-            drop(wg); // Let the WasccHost wrapper function return
-
-            loop {
-                select! {
-                    recv(inv_r) -> inv => {
-                        if let Ok(inv) = inv {
-                            if inv.operation == OP_PERFORM_LIVE_UPDATE { // Preempt the middleware chain if the operation is a live update
-                                resp_s.send(live_update(&mut guest, &inv)).unwrap();
-                                continue;
-                            }
-                            let inv_r = middleware::invoke_actor(mids.clone(), inv, &mut guest).unwrap();
-                            resp_s.send(inv_r).unwrap();
-                        }
-                    },
-                    recv(term_r) -> _term => {
-                        info!("Terminating {} {}", if actor { "actor" } else { "capability" }, route_key);
-                        deconfigure_actor(r2.clone(), bindings.clone(), &route_key);
-                        if !actor {
-                            remove_cap(caps, &route_key, &binding); // for cap providers, route key is the capid
-                        }
-                        authz::unregister_claims(map2, &c2.subject);
-                        return "".to_string()
-                    }
-                }
-            }
-        });
-        Ok(())
-    }
-
     pub(crate) fn record_binding(&self, actor: &str, capid: &str, binding: &str) -> Result<()> {
         let mut lock = self.bindings.write().unwrap();
         lock.push((actor.to_string(), capid.to_string(), binding.to_string()));
@@ -165,122 +45,27 @@ impl WasccHost {
             binding,
             capid
         );
-        trace!("{}", lock.len());
         Ok(())
     }
 
     pub(crate) fn ensure_extras(&self) -> Result<()> {
-        if self
-            .router
-            .read()
-            .unwrap()
-            .get_route("default", "wascc:extras")
-            .is_some()
-        {
-            return Ok(());
-        }
         self.add_native_capability(NativeCapability::from_instance(
             crate::extras::ExtrasCapabilityProvider::default(),
             None,
         )?)?;
         Ok(())
     }
-
-    /// Spawns a thread that listens on a channel for messages coming out of a capability provider
-    /// and messages going into the capability provider
-    pub(crate) fn spawn_capability_provider_and_listen(
-        &self,
-        capability: NativeCapability,
-        wg: WaitGroup,
-    ) -> Result<()> {
-        let capid = capability.id().to_string();
-        let binding = capability.binding_name.to_string();
-        let claims_map = self.claims.clone();
-        let router = self.router.clone();
-        let caps = self.caps.clone();
-
-        self.plugins.write().unwrap().add_plugin(capability)?;
-        let plugins = self.plugins.clone();
-        let middlewares = self.middlewares.clone();
-
-        thread::spawn(move || {
-            let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
-            let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
-                channel::unbounded();
-            let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
-            let dispatcher = WasccNativeDispatcher::new(resp_r.clone(), inv_s.clone(), &capid);
-            plugins
-                .write()
-                .unwrap()
-                .register_dispatcher(&binding, &capid, dispatcher)
-                .unwrap();
-
-            router
-                .write()
-                .unwrap()
-                .add_route(&binding, &capid, inv_s, resp_r, term_s);
-
-            info!("Native capability provider '({},{})' ready", binding, capid);
-            drop(wg);
-
-            loop {
-                select! {
-                    recv(inv_r) -> inv => {
-                        if let Ok(ref inv) = inv {
-                            let inv_r = match &inv.target {
-                                InvocationTarget::Capability{capid: _tgt_capid, binding: _tgt_binding} => {
-                                    // Run invocation through middleware, which will terminate at a plugin invocation
-                                    middleware::invoke_capability(middlewares.clone(), plugins.clone(), router.clone(), inv.clone()).unwrap()
-                                },
-                                InvocationTarget::Actor(tgt_actor) => {
-                                    let tgt_claims = claims_map.read().unwrap().get(tgt_actor).cloned().unwrap();
-                                    if !authz::can_invoke(&tgt_claims, &capid) {
-                                        InvocationResponse::error(inv, &format!(
-                                            "Dispatch between actor and unauthorized capability: {} <-> {}",
-                                            tgt_claims.subject, capid
-                                        ))
-                                    } else {
-                                        match router.read().unwrap().get_route(ACTOR_BINDING, &tgt_actor) {
-                                            Some(ref entry) => {
-                                                match entry.invoke(inv.clone()) {
-                                                    Ok(ir) => ir,
-                                                    Err(e) => InvocationResponse::error(inv,&format!(
-                                                        "Capability to actor call failure: {}", e
-                                                    ))
-                                                }
-                                            }
-                                            None => InvocationResponse::error(inv, "Dispatch to unknown actor"),
-                                        }
-                                    }
-                                }
-                            };
-                            resp_s.send(inv_r).unwrap();
-                        }
-                    },
-                    recv(term_r) -> _term => {
-                        info!("Terminating native capability provider {},{}", binding, capid);
-                        remove_cap(caps, &capid, &binding);
-                        router.write().unwrap().remove_route(&binding, &capid);
-                        plugins.write().unwrap().remove_plugin(&binding, &capid).unwrap();
-                        break;
-                    }
-                }
-            }
-        });
-
-        Ok(())
-    }
 }
 
 /// In the case of a portable capability provider, obtain its capability descriptor
-fn get_descriptor(host: &mut WapcHost) -> Result<CapabilityDescriptor> {
+pub(crate) fn get_descriptor(host: &mut WapcHost) -> Result<CapabilityDescriptor> {
     let msg = wascc_codec::core::HealthRequest { placeholder: false }; // TODO: eventually support sending an empty slice for this
     let res = host.call(OP_GET_CAPABILITY_DESCRIPTOR, &serialize(&msg)?)?;
     deserialize(&res).map_err(|e| e.into())
 }
 
 pub(crate) fn remove_cap(
-    caps: Arc<RwLock<HashMap<crate::router::RouteKey, CapabilityDescriptor>>>,
+    caps: Arc<RwLock<HashMap<crate::RouteKey, CapabilityDescriptor>>>,
     capid: &str,
     binding: &str,
 ) {
@@ -291,41 +76,21 @@ pub(crate) fn remove_cap(
 
 /// Puts a "live update" message into the dispatch queue, which will be handled
 /// as soon as it is pulled off the channel for the target actor
-pub(crate) fn replace_actor(router: Arc<RwLock<Router>>, new_actor: Actor) -> Result<()> {
+pub(crate) fn replace_actor(bus: Arc<MessageBus>, new_actor: Actor) -> Result<()> {
     let public_key = new_actor.token.claims.subject;
+    let tgt_subject = crate::bus::actor_subject(&public_key);
+    let inv = gen_liveupdate_invocation(&public_key, new_actor.bytes);
 
-    match router.read().unwrap().get_route(ACTOR_BINDING, &public_key) {
-        Some(ref entry) => {
-            match entry.invoke(gen_liveupdate_invocation(&public_key, new_actor.bytes)) {
-                Ok(_) => {
-                    info!("Actor {} replaced", public_key);
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            }
+    match bus.invoke(&tgt_subject, inv) {
+        Ok(_) => {
+            info!("Actor {} replaced", public_key);
+            Ok(())
         }
-        None => Err(errors::new(errors::ErrorKind::MiscHost(format!(
-            "Cannot replace non-existent actor: {}",
-            public_key
-        )))),
+        Err(e) => Err(e),
     }
 }
 
-/// Produces the identifier used for a binding's route key for an actor.
-/// Since actors can be either regular actor modules or providers, we
-/// either return the actor's subject/pk or the declared capability from the
-/// actor's signed metadata.
-fn route_key(claims: &Claims<wascap::jwt::Actor>) -> String {
-    let meta = claims.metadata.clone().unwrap();
-    if meta.provider {
-        // This is a portable capability provider, use the capability ID
-        meta.caps.unwrap()[0].to_string()
-    } else {
-        claims.subject.to_string()
-    }
-}
-
-fn live_update(guest: &mut WapcHost, inv: &Invocation) -> InvocationResponse {
+pub(crate) fn live_update(guest: &mut WapcHost, inv: &Invocation) -> InvocationResponse {
     match guest.replace_module(&inv.msg) {
         Ok(_) => InvocationResponse::success(inv, vec![]),
         Err(e) => {
@@ -346,7 +111,11 @@ fn gen_liveupdate_invocation(target: &str, bytes: Vec<u8>) -> Invocation {
 
 /// Removes all bindings for a given actor by sending the "deconfigure" message
 /// to each of the capabilities
-fn deconfigure_actor(router: Arc<RwLock<Router>>, bindings: Arc<RwLock<BindingsList>>, key: &str) {
+pub(crate) fn deconfigure_actor(
+    bus: Arc<MessageBus>,
+    bindings: Arc<RwLock<BindingsList>>,
+    key: &str,
+) {
     let cfg = CapabilityConfiguration {
         module: key.to_string(),
         values: HashMap::new(),
@@ -361,30 +130,34 @@ fn deconfigure_actor(router: Arc<RwLock<Router>>, bindings: Arc<RwLock<BindingsL
     };
 
     // (actor, capid, binding)
-    for (_actor, capid, binding) in nbindings {
-        if let Some(route) = router.read().unwrap().get_route(&binding, &capid) {
-            info!("Unbinding actor {} from {},{}", key, binding, capid);
-            let _ = route.invoke(gen_remove_actor(buf.clone(), &binding, &capid));
-            remove_binding(bindings.clone(), key, &binding, &capid);
-        } else {
-            trace!(
-                "No route for {},{} - skipping remove invocation",
-                binding,
-                capid
-            );
-        }
+    for (actor, capid, binding) in nbindings {
+        info!("Unbinding actor {} from {},{}", actor, binding, capid);
+        let _inv_r = bus.invoke(
+            &bus::provider_subject_bound_actor(&capid, &binding, &actor),
+            gen_remove_actor(buf.clone(), &binding, &capid),
+        );
+        remove_binding(bindings.clone(), key, &binding, &capid);
     }
-
-    router.write().unwrap().remove_route(ACTOR_BINDING, key);
 }
 
-fn remove_binding(bindings: Arc<RwLock<BindingsList>>, actor: &str, binding: &str, capid: &str) {
+/// Removes all bindings from a capability without notifying anyone
+pub(crate) fn unbind_all_from_cap(bindings: Arc<RwLock<BindingsList>>, capid: &str, binding: &str) {
+    let mut lock = bindings.write().unwrap();
+    lock.retain(|(_a, c, b)| !(c == capid) && (binding == b));
+}
+
+pub(crate) fn remove_binding(
+    bindings: Arc<RwLock<BindingsList>>,
+    actor: &str,
+    binding: &str,
+    capid: &str,
+) {
     // binding: (actor,  capid, binding)
     let mut lock = bindings.write().unwrap();
     lock.retain(|(a, c, b)| !(a == actor && b == binding && c == capid));
 }
 
-fn gen_remove_actor(msg: Vec<u8>, binding: &str, capid: &str) -> Invocation {
+pub(crate) fn gen_remove_actor(msg: Vec<u8>, binding: &str, capid: &str) -> Invocation {
     Invocation::new(
         SYSTEM_ACTOR.to_string(),
         InvocationTarget::Capability {
@@ -397,6 +170,7 @@ fn gen_remove_actor(msg: Vec<u8>, binding: &str, capid: &str) -> Invocation {
 }
 /// An immutable representation of an invocation within waSCC
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "lattice", derive(serde::Serialize, serde::Deserialize))]
 pub struct Invocation {
     pub origin: String,
     pub target: InvocationTarget,
@@ -407,6 +181,7 @@ pub struct Invocation {
 
 /// Represents an invocation target - either an actor or a bound capability provider
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "lattice", derive(serde::Serialize, serde::Deserialize))]
 pub enum InvocationTarget {
     Actor(String),
     Capability { capid: String, binding: String },
@@ -426,6 +201,7 @@ impl Invocation {
 
 /// The response to an invocation
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "lattice", derive(serde::Serialize, serde::Deserialize))]
 pub struct InvocationResponse {
     pub msg: Vec<u8>,
     pub error: Option<String>,
@@ -450,58 +226,45 @@ impl InvocationResponse {
     }
 }
 
-/// This function is called by the underlying waPC host in response to a guest module
-/// invoking a host import according to the waPC spec.
-/// The binding name uniquely identifies a capability provider (e.g. "default" or "userprofile" or "cache" etc)
-/// The namespace indicates the capability provider ID (e.g. "wascc:messaging" or "wascc:keyvalue")
-/// The operation is the name of the operation to perform on the provider (e.g. "PerformRequest" or "DeliverMessage")
-/// NOTE: if the target namespace of the invocation is an actor subject (e.g. "M...") then the invocation target will be for an actor,
-/// not a capability (this is what enables actor-to-actor comms)
-fn host_callback(
+pub(crate) fn wapc_host_callback(
     claims: Claims<wascap::jwt::Actor>,
-    router: Arc<RwLock<Router>>,
-    plugins: Arc<RwLock<PluginManager>>,
-    middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
-    bd: &str,
-    ns: &str,
-    op: &str,
+    bus: Arc<MessageBus>,
+    binding: &str,
+    namespace: &str,
+    operation: &str,
     payload: &[u8],
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
-    trace!("Guest {} invoking {}:{}", claims.subject, ns, op);
+    trace!(
+        "Guest {} invoking {}:{}",
+        claims.subject,
+        namespace,
+        operation
+    );
 
-    let capability_id = ns;
-    let inv = invocation_from_callback(&claims.subject, bd, ns, op, payload);
+    let capability_id = namespace;
+    let inv = invocation_from_callback(&claims.subject, binding, namespace, operation, payload);
 
     if !authz::can_invoke(&claims, capability_id) {
         return Err(Box::new(errors::new(errors::ErrorKind::Authorization(
             format!(
-                "Actor {} does not have permission to communicate with {}",
-                claims.subject, capability_id
+                "Actor {} attempted to call {} on {},{} - PERMISSION DENIED.",
+                claims.subject, operation, capability_id, binding
             ),
         ))));
     }
-    match &inv.target {
-        InvocationTarget::Actor(subject) => {
-            // This is an actor-to-actor call
-            match router.read().unwrap().get_route(ACTOR_BINDING, &subject) {
-                Some(entry) => match entry.invoke(inv.clone()) {
-                    Ok(inv_r) => Ok(inv_r.msg),
-                    Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
-                        e.into(),
-                    )))),
-                },
-                None => Err("Attempted actor-to-actor call to non-existent target".into()),
-            }
+    // Make a request on either `wasmbus.Mxxxxx` for an actor or `wasmbus.{capid}.{binding}.{calling-actor}` for
+    // a bound capability provider
+    let invoke_subject = match &inv.target {
+        InvocationTarget::Actor(subject) => bus::actor_subject(subject),
+        InvocationTarget::Capability { capid, binding } => {
+            bus::provider_subject_bound_actor(capid, binding, &claims.subject)
         }
-        InvocationTarget::Capability { .. } => {
-            // This is a standard actor-to-host call
-            match middleware::invoke_capability(middlewares, plugins.clone(), router, inv.clone()) {
-                Ok(inv_r) => Ok(inv_r.msg),
-                Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
-                    e.into(),
-                )))),
-            }
-        }
+    };
+    match bus.invoke(&invoke_subject, inv) {
+        Ok(inv_r) => Ok(inv_r.msg),
+        Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
+            e.into(),
+        )))),
     }
 }
 

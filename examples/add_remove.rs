@@ -28,9 +28,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     for (id, _claims) in host.actors() {
         println!(" - {}", id);
     }
-    println!("Capabilities:");
-    for cap in host.capabilities() {
-        println!("{:?}", cap);
+    println!("Capabilities (before removal)");
+    for ((binding, capid), _descriptor) in host.capabilities() {
+        println!("- {},{}", binding, capid);
     }
 
     // Need to wait until the HTTP server finishes starting before we
@@ -38,6 +38,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("Sleeping 1s...");
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
+    println!("Removing echo actor 2...");
     // This will terminate the actor and free up the HTTP port
     host.remove_actor("MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2")?;
 

@@ -26,6 +26,7 @@ struct CliCommand {
     expand_env: bool,
 }
 
+#[cfg(feature = "manifest")]
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args = Cli::from_args();
     let cmd = args.command;
@@ -41,5 +42,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     std::thread::park();
 
+    Ok(())
+}
+
+#[cfg(not(feature = "manifest"))]
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "The general-purpose waSCC host application needs to be built with the `manifest` feature."
+    );
     Ok(())
 }

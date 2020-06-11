@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -37,6 +37,7 @@ env_logger = "0.7.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 gantryclient = { version = "0.0.7", optional = true }
+natsio = { version = "0.3.2", optional = true }
 
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.12", optional = true }
@@ -55,6 +56,7 @@ manifest = ["serde", "serde_yaml", "serde_json", "envmnt"]
 bin = ["structopt"]
 gantry = ["gantryclient"]
 prometheus_middleware = ["prometheus", "hyper", "tokio"]
+lattice = ["natsio", "serde"]
 
 [[example]]
 name = "kvcounter_manifest"

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::inthost::{Invocation, InvocationResponse, InvocationTarget};
-use crossbeam_channel::{Receiver, Sender};
-use std::error::Error;
+use crate::bus::MessageBus;
+use crate::inthost::{Invocation, InvocationTarget};
+use std::{error::Error, sync::Arc};
+
 use wascc_codec::capabilities::Dispatcher;
 
 /// A dispatcher is given to each capability provider, allowing it to send
@@ -22,20 +23,14 @@ use wascc_codec::capabilities::Dispatcher;
 /// is one way, and is _not_ used for the guest module to send commands to capabilities
 #[derive(Clone)]
 pub(crate) struct WasccNativeDispatcher {
-    resp_r: Receiver<InvocationResponse>,
-    invoc_s: Sender<Invocation>,
+    bus: Arc<MessageBus>,
     capid: String,
 }
 
 impl WasccNativeDispatcher {
-    pub fn new(
-        resp_r: Receiver<InvocationResponse>,
-        invoc_s: Sender<Invocation>,
-        capid: &str,
-    ) -> Self {
+    pub fn new(bus: Arc<MessageBus>, capid: &str) -> Self {
         WasccNativeDispatcher {
-            resp_r,
-            invoc_s,
+            bus,
             capid: capid.to_string(),
         }
     }
@@ -55,8 +50,9 @@ impl Dispatcher for WasccNativeDispatcher {
             op,
             msg.to_vec(),
         );
-        self.invoc_s.send(inv)?;
-        let resp = self.resp_r.recv();
+        let tgt_sub = crate::bus::actor_subject(actor);
+        let resp = self.bus.invoke(&tgt_sub, inv);
+
         match resp {
             Ok(r) => match r.error {
                 Some(e) => Err(format!("Invocation failure: {}", e).into()),
