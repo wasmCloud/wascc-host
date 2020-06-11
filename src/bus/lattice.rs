@@ -7,7 +7,7 @@ use std::time::Duration;
 use wascc_codec::{deserialize, serialize};
 
 const LATTICE_HOST_KEY: &str = "LATTICE_HOST"; // env var name
-const DEFAULT_LATTICE_HOST: &str = "127.0.0.1";
+const DEFAULT_LATTICE_HOST: &str = "127.0.0.1"; // default mode is anonymous via loopback
 const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
 const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 500;
 

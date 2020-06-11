@@ -13,11 +13,29 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2    
-    - name: Build with Gantry+Manifest
-      run: cargo build --verbose --features "manifest gantry bin"
-    - name: Run tests Gantry+Manifest
-      run: cargo test --verbose --features "manifest gantry bin"
-    - name: Run tests (manifest only)
-      run: cargo test --verbose --features "manifest"
-    - name: Run tests (gantry only)
-      run: cargo test --verbose --features "gantry"    
+    - name: Build with all Features
+      run: cargo build --verbose --all-features
+  
+  test:
+    name: Test feature matrix
+
+    services:
+      names:
+        image: nats
+        ports:
+          - 6222:6222
+          - 4222:4222
+          - 8222:8222
+
+    steps:
+      - name: Run tests Gantry+Manifest
+        run: cargo test --verbose --features "manifest gantry bin"
+      - name: Run tests (manifest only)
+        run: cargo test --verbose --features "manifest"
+      - name: Run tests (gantry only)
+        run: cargo test --verbose --features "gantry"
+      - name: Run tests (lattice mode)
+        run: cargo test --verbose --features "manifest lattice"
+        env:
+          LATTICE_HOST: 0.0.0.0
+          LATTICE_RPC_TIMEOUT_MILLIS: 100
