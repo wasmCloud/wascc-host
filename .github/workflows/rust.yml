@@ -29,13 +29,17 @@ jobs:
           - 8222:8222
 
     steps:
-      - name: Run tests Gantry+Manifest
+      - uses: actions/checkout@v2 
+        name: Run tests Gantry+Manifest
         run: cargo test --verbose --features "manifest gantry bin"
-      - name: Run tests (manifest only)
+      - uses: actions/checkout@v2 
+        name: Run tests (manifest only)
         run: cargo test --verbose --features "manifest"
-      - name: Run tests (gantry only)
+      - uses: actions/checkout@v2         
+        name: Run tests (gantry only)
         run: cargo test --verbose --features "gantry"
-      - name: Run tests (lattice mode)
+      - uses: actions/checkout@v2 
+        name: Run tests (lattice mode)
         run: cargo test --verbose --features "manifest lattice"
         env:
           LATTICE_HOST: 0.0.0.0
