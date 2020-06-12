@@ -98,13 +98,13 @@ fn get_env(var: &str, default: &str) -> String {
 
 fn get_connection() -> nats::Connection {
     let host = get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST);
-    let opts = nats::ConnectionOptions::new().with_name("waSCC Lattice");
-    if let Some(creds) = get_credsfile() {
-        opts.with_credentials(creds).connect(&host)
+    let mut opts = if let Some(creds) = get_credsfile() {
+        nats::ConnectionOptions::with_credentials(creds)
     } else {
-        opts.connect(&host)
-    }
-    .unwrap()
+        nats::ConnectionOptions::new()
+    };
+    opts = opts.with_name("waSCC Lattice");
+    opts.connect(&host).unwrap()
 }
 
 fn get_timeout() -> Duration {
