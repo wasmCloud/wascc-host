@@ -17,7 +17,7 @@ use wascc_codec::capabilities::{
 };
 use wascc_codec::core::OP_BIND_ACTOR;
 use wascc_codec::extras::*;
-use wascc_codec::{deserialize, serialize};
+use wascc_codec::{deserialize, serialize, SYSTEM_ACTOR};
 
 pub(crate) struct ExtrasCapabilityProvider {
     dispatcher: Arc<RwLock<Box<dyn Dispatcher>>>,
@@ -33,7 +33,7 @@ impl Default for ExtrasCapabilityProvider {
     }
 }
 
-const CAPABILITY_ID: &str = "wascc:extras";
+pub(crate) const CAPABILITY_ID: &str = "wascc:extras";
 
 impl ExtrasCapabilityProvider {
     fn generate_guid(
@@ -147,7 +147,7 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
         trace!("Received host call from {}, operation - {}", actor, op);
 
         match op {
-            OP_GET_CAPABILITY_DESCRIPTOR if actor == "system" => self.get_descriptor(),
+            OP_GET_CAPABILITY_DESCRIPTOR if actor == SYSTEM_ACTOR => self.get_descriptor(),
             OP_REQUEST_GUID => self.generate_guid(actor, deserialize(msg)?),
             OP_REQUEST_RANDOM => self.generate_random(actor, deserialize(msg)?),
             OP_REQUEST_SEQUENCE => self.generate_sequence(actor, deserialize(msg)?),

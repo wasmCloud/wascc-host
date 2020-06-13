@@ -146,7 +146,7 @@ pub struct WasccHost {
 
 impl WasccHost {
     /// Creates a new waSCC runtime host
-    pub fn new() -> WasccHost {
+    pub fn new() -> Self {
         #[cfg(feature = "gantry")]
         let host = WasccHost {
             terminators: Arc::new(RwLock::new(HashMap::new())),
@@ -217,10 +217,15 @@ impl WasccHost {
             self.terminators.clone(),
         )?;
         wg.wait();
-        if actor.capabilities().contains(&"wascc:extras".into()) {
+        if actor.capabilities().contains(&extras::CAPABILITY_ID.into()) {
             // force a binding so that there's a private actor subject on the bus for the
             // actor to communicate with the extras provider
-            self.bind_actor(&actor.public_key(), "wascc:extras", None, HashMap::new())?;
+            self.bind_actor(
+                &actor.public_key(),
+                extras::CAPABILITY_ID,
+                None,
+                HashMap::new(),
+            )?;
         }
 
         Ok(())
@@ -452,7 +457,7 @@ impl WasccHost {
             )));
         }
         let inv = Invocation::new(
-            "system".to_string(),
+            SYSTEM_ACTOR.to_string(),
             InvocationTarget::Actor(actor.to_string()),
             operation,
             msg.to_vec(),
