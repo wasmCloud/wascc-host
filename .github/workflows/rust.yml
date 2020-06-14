@@ -12,7 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2    
+    - uses: actions/checkout@v2
+    - name: Run fmt
+      run: cargo fmt -- --check
     - name: Build
       run: cargo build --verbose --all-features
     - name: Run tests
@@ -20,4 +22,4 @@ jobs:
     - name: Run tests (manifest only)
       run: cargo test --verbose --features "manifest"
     - name: Run tests (gantry only)
-      run: cargo test --verbose --features "gantry"    
+      run: cargo test --verbose --features "gantry"
