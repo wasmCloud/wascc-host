@@ -27,6 +27,10 @@ pub(crate) fn provider_subject(capid: &str, binding: &str) -> String {
     format!("wasmbus.provider.{}.{}", normalize_capid(capid), binding)
 }
 
+// By convention most of the waSCC ecosystem uses a "group:item" string
+// for the capability IDs, e.g. "wascc:messaging" or "gpio:relay". To
+// accommodate message broker subjects that might not work with the ":"
+// character, we normalize the segments to dot-separated.
 fn normalize_capid(capid: &str) -> String {
     capid.to_lowercase().replace(":", ".")
 }
