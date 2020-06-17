@@ -520,6 +520,20 @@ impl WasccHost {
         let lock = self.caps.read().unwrap();
         lock.clone()
     }
+
+    pub fn actors_by_tag(&self, tags: &[&str]) -> Vec<String> {
+        let mut actors = vec![];
+
+        for (actor, claims) in self.claims.read().unwrap().iter() {
+            if let Some(actor_tags) = claims.metadata.as_ref().and_then(|m| m.tags.as_ref()) {
+                if tags.iter().all(|&t| actor_tags.contains(&t.to_string())) {
+                    actors.push(actor.to_string())
+                }
+            }
+        }
+
+        actors
+    }
 }
 
 pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
