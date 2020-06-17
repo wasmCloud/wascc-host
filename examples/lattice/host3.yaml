@@ -1,0 +1,8 @@
+# Loads a host that starts off with nothing but an unbound HTTP server provider
+# NOTE that there are no actors loaded
+---
+    actors: []   
+    capabilities:        
+        - path: ./examples/.assets/libwascc_httpsrv.so
+    bindings: []
+    

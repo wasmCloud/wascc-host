@@ -1,3 +1,17 @@
+// Copyright 2015-2020 Capital One Services, LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::HashMap;
 use wascc_host::{Actor, NativeCapability, WasccHost};
 
@@ -28,9 +42,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     for (id, _claims) in host.actors() {
         println!(" - {}", id);
     }
-    println!("Capabilities:");
-    for cap in host.capabilities() {
-        println!("{:?}", cap);
+    println!("Capabilities (before removal)");
+    for ((binding, capid), _descriptor) in host.capabilities() {
+        println!("- {},{}", binding, capid);
     }
 
     // Need to wait until the HTTP server finishes starting before we
@@ -38,6 +52,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("Sleeping 1s...");
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
+    println!("Removing echo actor 2...");
     // This will terminate the actor and free up the HTTP port
     host.remove_actor("MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2")?;
 

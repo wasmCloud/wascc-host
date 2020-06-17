@@ -1,3 +1,17 @@
+// Copyright 2015-2020 Capital One Services, LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // A default implementation of the "wascc:extras" provider that is always included
 // with the host runtime. This provides functionality for generating random numbers,
 // generating a guid, and generating a sequence number... things that a standalone
@@ -15,8 +29,9 @@ use wascc_codec::capabilities::{
     CapabilityDescriptor, CapabilityProvider, Dispatcher, NullDispatcher, OperationDirection,
     OP_GET_CAPABILITY_DESCRIPTOR,
 };
+use wascc_codec::core::OP_BIND_ACTOR;
 use wascc_codec::extras::*;
-use wascc_codec::{deserialize, serialize};
+use wascc_codec::{deserialize, serialize, SYSTEM_ACTOR};
 
 pub(crate) struct ExtrasCapabilityProvider {
     dispatcher: Arc<RwLock<Box<dyn Dispatcher>>>,
@@ -32,7 +47,7 @@ impl Default for ExtrasCapabilityProvider {
     }
 }
 
-const CAPABILITY_ID: &str = "wascc:extras";
+pub(crate) const CAPABILITY_ID: &str = "wascc:extras";
 
 impl ExtrasCapabilityProvider {
     fn generate_guid(
@@ -146,10 +161,11 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
         trace!("Received host call from {}, operation - {}", actor, op);
 
         match op {
-            OP_GET_CAPABILITY_DESCRIPTOR if actor == "system" => self.get_descriptor(),
+            OP_GET_CAPABILITY_DESCRIPTOR if actor == SYSTEM_ACTOR => self.get_descriptor(),
             OP_REQUEST_GUID => self.generate_guid(actor, deserialize(msg)?),
             OP_REQUEST_RANDOM => self.generate_random(actor, deserialize(msg)?),
             OP_REQUEST_SEQUENCE => self.generate_sequence(actor, deserialize(msg)?),
+            OP_BIND_ACTOR => Ok(vec![]),
             _ => Err("bad dispatch".into()),
         }
     }

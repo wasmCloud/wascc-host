@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::Result;
-use crate::{plugins::PluginManager, router::Router, Invocation, InvocationResponse};
+use crate::{plugins::PluginManager, Invocation, InvocationResponse};
 use std::sync::Arc;
 use std::sync::RwLock;
 use wapc::WapcHost;
@@ -29,11 +29,11 @@ pub trait Middleware: Send + Sync + 'static {
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
 }
 
-pub(crate) fn invoke_capability(
+/// Follows a chain of middleware, ultimately executing the native plugin
+pub(crate) fn invoke_native_capability(
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
-    plugins: Arc<RwLock<PluginManager>>,
-    router: Arc<RwLock<Router>>,
     inv: Invocation,
+    plugins: Arc<RwLock<PluginManager>>,
 ) -> Result<InvocationResponse> {
     let mw = &middlewares.read().unwrap();
     let inv = match run_capability_pre_invoke(inv.clone(), mw) {
@@ -46,7 +46,7 @@ pub(crate) fn invoke_capability(
 
     let lock = plugins.read().unwrap();
 
-    let r = match lock.call(router, &inv) {
+    let r = match lock.call(&inv) {
         Ok(r) => r,
         Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke capability: {}", e)),
     };
@@ -56,6 +56,38 @@ pub(crate) fn invoke_capability(
         Err(e) => {
             error!("Middleware failure: {}", e);
             Ok(r)
+        }
+    }
+}
+
+/// Follows a chain of middleware, ultimately executing a portable capability provider function
+pub(crate) fn invoke_portable_capability(
+    middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
+    inv: Invocation,
+    guest: &mut WapcHost,
+) -> Result<InvocationResponse> {
+    let mw = &middlewares.read().unwrap();
+    let inv = match run_capability_pre_invoke(inv.clone(), mw) {
+        Ok(i) => i,
+        Err(e) => {
+            error!("Middleware failure: {}", e);
+            inv
+        }
+    };
+
+    let inv_r = match guest.call(&inv.operation, &inv.msg) {
+        Ok(v) => InvocationResponse::success(&inv, v),
+        Err(e) => InvocationResponse::error(
+            &inv,
+            &format!("Failed to invoke capability provider actor: {}", e),
+        ),
+    };
+
+    match run_capability_post_invoke(inv_r.clone(), &middlewares.read().unwrap()) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            error!("Middleware failure: {}", e);
+            Ok(inv_r)
         }
     }
 }
