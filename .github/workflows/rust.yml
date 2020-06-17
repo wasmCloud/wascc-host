@@ -12,9 +12,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2    
-    - name: Build with all Features
-      run: cargo build --verbose --all-features
+    - uses: actions/checkout@v2
+    - name: Run fmt
+      run: cargo fmt -- --check
+    - name: Build
+      run: cargo build --verbose --all-features    
   
   test:
     name: Test feature matrix
@@ -29,7 +31,7 @@ jobs:
           - 8222:8222
 
     steps:
-      - uses: actions/checkout@v2 
+      - uses: actions/checkout@v2       
       - name: Run tests Gantry+Manifest
         run: cargo test --verbose --features "manifest gantry bin"      
       - name: Run tests (manifest only)

@@ -110,7 +110,7 @@ fn get_env(var: &str, default: &str) -> String {
     }
 }
 
-fn get_connection() -> nats::Connection {    
+fn get_connection() -> nats::Connection {
     let host = get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST);
     info!("Lattice Host: {}", host);
     let mut opts = if let Some(creds) = get_credsfile() {
