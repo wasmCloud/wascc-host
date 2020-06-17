@@ -17,12 +17,8 @@ use crate::dispatch::WasccNativeDispatcher;
 use crate::errors::{self, ErrorKind};
 use crate::inthost::Invocation;
 use crate::inthost::{InvocationResponse, InvocationTarget};
-use crate::{
-    router::{route_key, RouteKey, Router},
-    Result,
-};
+use crate::{route_key, Result, RouteKey};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 #[derive(Default)]
 pub(crate) struct PluginManager {
@@ -45,16 +41,12 @@ impl PluginManager {
                 ))),
             },
             None => Err(errors::new(ErrorKind::CapabilityProvider(
-                "attempt to register dispatcher for non-existent plugin".into(),
+                "Attempt to register dispatcher for non-existent plugin".into(),
             ))),
         }
     }
 
-    pub fn call(
-        &self,
-        router: Arc<RwLock<Router>>,
-        inv: &Invocation,
-    ) -> Result<InvocationResponse> {
+    pub fn call(&self, inv: &Invocation) -> Result<InvocationResponse> {
         if let InvocationTarget::Capability { capid, binding } = &inv.target {
             let route_key = route_key(&binding, &capid);
             match self.plugins.get(&route_key) {
@@ -63,17 +55,11 @@ impl PluginManager {
                     Ok(msg) => Ok(InvocationResponse::success(inv, msg)),
                     Err(e) => Err(errors::new(errors::ErrorKind::HostCallFailure(e))),
                 },
-                // if there's no plugin, check if there's a route pointing to this capid (portable capability provider)
-                None => {
-                    if let Some(entry) = router.read().unwrap().get_route(&binding, &capid) {
-                        entry.invoke(inv.clone())
-                    } else {
-                        Err(errors::new(ErrorKind::CapabilityProvider(format!(
-                            "No such capability ID registered as native plug-in or portable provider: {:?}",
-                            route_key
-                        ))))
-                    }
-                }
+                // if there's no plugin, return an error
+                None => Err(errors::new(ErrorKind::CapabilityProvider(format!(
+                    "No such capability ID registered as native plug-in {:?}",
+                    route_key
+                )))),
             }
         } else {
             Err(errors::new(ErrorKind::MiscHost(
