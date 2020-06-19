@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use wascc_host::middleware::MiddlewareResponse;
 use wascc_host::{Actor, Invocation, InvocationResponse, Middleware, NativeCapability, WasccHost};
 
 #[macro_use]
 extern crate log;
+
+type Result<T> = std::result::Result<T, wascc_host::errors::Error>;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -14,6 +17,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         None,
     )?)?;
 
+    host.add_middleware(CachingMiddleware::default());
     host.add_middleware(LoggingMiddleware::default());
 
     host.bind_actor(
@@ -42,29 +46,126 @@ fn generate_port_config(port: u16) -> HashMap<String, String> {
 }
 
 #[derive(Default)]
-struct LoggingMiddleware {}
+struct CachingMiddleware {}
 
-impl Middleware for LoggingMiddleware {
+impl Middleware for CachingMiddleware {
     fn actor_pre_invoke(&self, inv: Invocation) -> wascc_host::Result<Invocation> {
-        info!("ACTOR(PRE): {}", inv.operation);
+        info!("CachingMiddleware-ACTOR(PRE): {}", inv.operation);
         Ok(inv)
     }
+
+    fn actor_invoke(
+        &self,
+        inv: Invocation,
+        _operation: &dyn Fn(Invocation) -> InvocationResponse,
+    ) -> Result<MiddlewareResponse> {
+        info!(
+            "CachingMiddleware-ACTOR(INV): operation not invoked, \
+        cached response returned and middleware execution will halt"
+        );
+        Ok(MiddlewareResponse::Halt(InvocationResponse::success(
+            &inv,
+            "cached actor response".as_bytes().to_vec(),
+        )))
+    }
+
     fn actor_post_invoke(
         &self,
         response: InvocationResponse,
     ) -> wascc_host::Result<InvocationResponse> {
-        info!("ACTOR(POST): success: {}", response.error.is_none());
+        info!(
+            "CachingMiddleware-ACTOR(POST): success: {}",
+            response.error.is_none()
+        );
         Ok(response)
     }
+
     fn capability_pre_invoke(&self, inv: Invocation) -> wascc_host::Result<Invocation> {
-        info!("CAP(PRE): {}", inv.operation);
+        info!("CachingMiddleware-CAP(PRE): {}", inv.operation);
         Ok(inv)
     }
+
+    fn capability_invoke(
+        &self,
+        inv: Invocation,
+        _operation: &dyn Fn(Invocation) -> InvocationResponse,
+    ) -> Result<MiddlewareResponse> {
+        info!(
+            "CachingMiddleware-CAP(INV): operation not invoked, \
+        cached response returned and middleware execution will halt"
+        );
+        Ok(MiddlewareResponse::Halt(InvocationResponse::success(
+            &inv,
+            "cached capability response".as_bytes().to_vec(),
+        )))
+    }
+
     fn capability_post_invoke(
         &self,
         response: InvocationResponse,
     ) -> wascc_host::Result<InvocationResponse> {
-        info!("CAP(POST): success: {}", response.error.is_none());
+        info!(
+            "CachingMiddleware-CAP(POST): success: {}",
+            response.error.is_none()
+        );
+        Ok(response)
+    }
+}
+
+#[derive(Default)]
+struct LoggingMiddleware {}
+
+impl Middleware for LoggingMiddleware {
+    fn actor_pre_invoke(&self, inv: Invocation) -> wascc_host::Result<Invocation> {
+        info!("LoggingMiddleware-ACTOR(PRE): {}", inv.operation);
+        Ok(inv)
+    }
+
+    fn actor_invoke(
+        &self,
+        inv: Invocation,
+        operation: &dyn Fn(Invocation) -> InvocationResponse,
+    ) -> Result<MiddlewareResponse> {
+        info!("LoggingMiddleware-ACTOR(INV): {}", inv.operation);
+        Ok(MiddlewareResponse::Continue(operation(inv)))
+    }
+
+    fn actor_post_invoke(
+        &self,
+        response: InvocationResponse,
+    ) -> wascc_host::Result<InvocationResponse> {
+        info!(
+            "LoggingMiddleware-ACTOR(POST): success: {}",
+            response.error.is_none()
+        );
+        Ok(response)
+    }
+
+    fn capability_pre_invoke(&self, inv: Invocation) -> wascc_host::Result<Invocation> {
+        info!("LoggingMiddleware-CAP(PRE): {}", inv.operation);
+        Ok(inv)
+    }
+
+    fn capability_invoke(
+        &self,
+        inv: Invocation,
+        _operation: &dyn Fn(Invocation) -> InvocationResponse,
+    ) -> Result<MiddlewareResponse> {
+        info!("LoggingMiddleware-CAP(INV): never invoked, CachingMiddleware halted middleware execution");
+        Ok(MiddlewareResponse::Halt(InvocationResponse::error(
+            &inv,
+            "This will not be executed",
+        )))
+    }
+
+    fn capability_post_invoke(
+        &self,
+        response: InvocationResponse,
+    ) -> wascc_host::Result<InvocationResponse> {
+        info!(
+            "LoggingMiddleware-CAP(POST): success: {}",
+            response.error.is_none()
+        );
         Ok(response)
     }
 }

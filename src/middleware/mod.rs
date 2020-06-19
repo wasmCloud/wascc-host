@@ -24,9 +24,25 @@ pub mod prometheus;
 /// The trait that must be implemented by all waSCC middleware
 pub trait Middleware: Send + Sync + 'static {
     fn actor_pre_invoke(&self, inv: Invocation) -> Result<Invocation>;
+    fn actor_invoke(
+        &self,
+        inv: Invocation,
+        operation: &dyn Fn(Invocation) -> InvocationResponse,
+    ) -> Result<MiddlewareResponse>;
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
+
     fn capability_pre_invoke(&self, inv: Invocation) -> Result<Invocation>;
+    fn capability_invoke(
+        &self,
+        inv: Invocation,
+        operation: &dyn Fn(Invocation) -> InvocationResponse,
+    ) -> Result<MiddlewareResponse>;
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
+}
+
+pub enum MiddlewareResponse {
+    Continue(InvocationResponse),
+    Halt(InvocationResponse),
 }
 
 pub(crate) fn invoke_capability(
@@ -35,8 +51,7 @@ pub(crate) fn invoke_capability(
     router: Arc<RwLock<Router>>,
     inv: Invocation,
 ) -> Result<InvocationResponse> {
-    let mw = &middlewares.read().unwrap();
-    let inv = match run_capability_pre_invoke(inv.clone(), mw) {
+    let inv = match run_capability_pre_invoke(inv.clone(), &middlewares.read().unwrap()) {
         Ok(i) => i,
         Err(e) => {
             error!("Middleware failure: {}", e);
@@ -44,29 +59,31 @@ pub(crate) fn invoke_capability(
         }
     };
 
-    let lock = plugins.read().unwrap();
-
-    let r = match lock.call(router, &inv) {
-        Ok(r) => r,
-        Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke capability: {}", e)),
-    };
-
-    match run_capability_post_invoke(r.clone(), &middlewares.read().unwrap()) {
-        Ok(r) => Ok(r),
-        Err(e) => {
-            error!("Middleware failure: {}", e);
-            Ok(r)
+    match run_capability_invoke(
+        &middlewares.read().unwrap(),
+        &plugins.read().unwrap(),
+        &router,
+        inv,
+    ) {
+        Ok(response) => {
+            match run_capability_post_invoke(response.clone(), &middlewares.read().unwrap()) {
+                Ok(r) => Ok(r),
+                Err(e) => {
+                    error!("Middleware failure: {}", e);
+                    Ok(response)
+                }
+            }
         }
+        Err(e) => Err(e),
     }
 }
 
 pub(crate) fn invoke_actor(
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
     inv: Invocation,
-    guest: &mut WapcHost,
+    guest: &WapcHost,
 ) -> Result<InvocationResponse> {
-    let mw = &middlewares.read().unwrap();
-    let inv = match run_actor_pre_invoke(inv.clone(), mw) {
+    let inv = match run_actor_pre_invoke(inv.clone(), &middlewares.read().unwrap()) {
         Ok(i) => i,
         Err(e) => {
             error!("Middleware failure: {}", e);
@@ -74,17 +91,17 @@ pub(crate) fn invoke_actor(
         }
     };
 
-    let inv_r = match guest.call(&inv.operation, &inv.msg) {
-        Ok(v) => InvocationResponse::success(&inv, v),
-        Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke guest call: {}", e)),
-    };
-    let lock = middlewares.read().unwrap();
-    match run_actor_post_invoke(inv_r.clone(), &lock) {
-        Ok(r) => Ok(r),
-        Err(e) => {
-            error!("Middleware failure: {}", e);
-            Ok(inv_r)
+    match run_actor_invoke(&middlewares.read().unwrap(), inv, guest) {
+        Ok(response) => {
+            match run_actor_post_invoke(response.clone(), &middlewares.read().unwrap()) {
+                Ok(r) => Ok(r),
+                Err(e) => {
+                    error!("Middleware failure: {}", e);
+                    Ok(response)
+                }
+            }
         }
+        Err(e) => Err(e),
     }
 }
 
@@ -100,6 +117,34 @@ fn run_actor_pre_invoke(
         }
     }
     Ok(cur_inv)
+}
+
+fn run_actor_invoke(
+    middlewares: &[Box<dyn Middleware>],
+    inv: Invocation,
+    guest: &WapcHost,
+) -> Result<InvocationResponse> {
+    let invoke_operation = |inv: Invocation| match guest.call(&inv.operation, &inv.msg) {
+        Ok(v) => InvocationResponse::success(&inv, v),
+        Err(e) => InvocationResponse::error(&inv, &format!("failed to invoke actor: {}", e)),
+    };
+
+    let mut cur_resp = Ok(InvocationResponse::error(
+        &inv,
+        "No middleware invoked the operation",
+    ));
+
+    for m in middlewares.iter() {
+        match m.actor_invoke(inv.clone(), &invoke_operation) {
+            Ok(mr) => match mr {
+                MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
+                MiddlewareResponse::Halt(res) => return Ok(res),
+            },
+            Err(e) => return Err(e),
+        }
+    }
+
+    cur_resp
 }
 
 fn run_actor_post_invoke(
@@ -130,6 +175,35 @@ pub(crate) fn run_capability_pre_invoke(
     Ok(cur_inv)
 }
 
+pub(crate) fn run_capability_invoke(
+    middlewares: &[Box<dyn Middleware>],
+    plugins: &PluginManager,
+    router: &Arc<RwLock<Router>>,
+    inv: Invocation,
+) -> Result<InvocationResponse> {
+    let invoke_operation = |inv: Invocation| match plugins.call(router.clone(), &inv) {
+        Ok(r) => r,
+        Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke capability: {}", e)),
+    };
+
+    let mut cur_resp = Ok(InvocationResponse::error(
+        &inv,
+        "No middleware invoked the operation",
+    ));
+
+    for m in middlewares.iter() {
+        match m.capability_invoke(inv.clone(), &invoke_operation) {
+            Ok(mr) => match mr {
+                MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
+                MiddlewareResponse::Halt(res) => return Ok(res),
+            },
+            Err(e) => return Err(e),
+        }
+    }
+
+    cur_resp
+}
+
 pub(crate) fn run_capability_post_invoke(
     resp: InvocationResponse,
     middlewares: &[Box<dyn Middleware>],
@@ -145,12 +219,13 @@ pub(crate) fn run_capability_post_invoke(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::Middleware;
     use crate::inthost::Invocation;
     use crate::inthost::{InvocationResponse, InvocationTarget};
+    use crate::middleware::MiddlewareResponse;
     use crate::Result;
 
     struct IncMiddleware {
@@ -165,6 +240,13 @@ mod test {
             self.pre.fetch_add(1, Ordering::SeqCst);
             Ok(inv)
         }
+        fn actor_invoke(
+            &self,
+            inv: Invocation,
+            operation: &dyn Fn(Invocation) -> InvocationResponse,
+        ) -> Result<MiddlewareResponse> {
+            Ok(MiddlewareResponse::Continue(operation(inv)))
+        }
         fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
             self.post.fetch_add(1, Ordering::SeqCst);
             Ok(response)
@@ -172,6 +254,13 @@ mod test {
         fn capability_pre_invoke(&self, inv: Invocation) -> Result<Invocation> {
             self.cap_pre.fetch_add(1, Ordering::SeqCst);
             Ok(inv)
+        }
+        fn capability_invoke(
+            &self,
+            inv: Invocation,
+            operation: &dyn Fn(Invocation) -> InvocationResponse,
+        ) -> Result<MiddlewareResponse> {
+            Ok(MiddlewareResponse::Continue(operation(inv)))
         }
         fn capability_post_invoke(
             &self,
