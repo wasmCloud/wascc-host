@@ -27,7 +27,8 @@ crossbeam-utils = "^0.7.0"
 prometheus = { version = "0.9", features = ["push"], optional = true }
 hyper = { version = "0.13", optional = true }
 tokio = { version = "0.2", features = ["macros"], optional = true }
-wapc = "0.7.2"
+#wapc = "0.7.2"
+wapc = { version = "0.7.2", path = "../wapc-rust" }
 wascc-codec = "0.7.1"
 wascap = "0.4.5"
 log = "0.4.8"

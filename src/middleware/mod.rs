@@ -27,7 +27,7 @@ pub trait Middleware: Send + Sync + 'static {
     fn actor_invoke(
         &self,
         inv: Invocation,
-        operation: &dyn Fn(Invocation) -> InvocationResponse,
+        handler: InvocationHandler,
     ) -> Result<MiddlewareResponse>;
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
 
@@ -35,7 +35,7 @@ pub trait Middleware: Send + Sync + 'static {
     fn capability_invoke(
         &self,
         inv: Invocation,
-        operation: &dyn Fn(Invocation) -> InvocationResponse,
+        handler: InvocationHandler,
     ) -> Result<MiddlewareResponse>;
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse>;
 }
@@ -43,6 +43,20 @@ pub trait Middleware: Send + Sync + 'static {
 pub enum MiddlewareResponse {
     Continue(InvocationResponse),
     Halt(InvocationResponse),
+}
+
+pub struct InvocationHandler<'a> {
+    operation: &'a dyn Fn(Invocation) -> InvocationResponse,
+}
+
+impl<'a> InvocationHandler<'a> {
+    fn new(operation: &'a dyn Fn(Invocation) -> InvocationResponse) -> Self {
+        Self { operation }
+    }
+
+    pub fn invoke(&self, inv: Invocation) -> InvocationResponse {
+        (self.operation)(inv)
+    }
 }
 
 pub(crate) fn invoke_capability(
@@ -135,7 +149,7 @@ fn run_actor_invoke(
     ));
 
     for m in middlewares.iter() {
-        match m.actor_invoke(inv.clone(), &invoke_operation) {
+        match m.actor_invoke(inv.clone(), InvocationHandler::new(&invoke_operation)) {
             Ok(mr) => match mr {
                 MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
                 MiddlewareResponse::Halt(res) => return Ok(res),
@@ -192,7 +206,7 @@ pub(crate) fn run_capability_invoke(
     ));
 
     for m in middlewares.iter() {
-        match m.capability_invoke(inv.clone(), &invoke_operation) {
+        match m.capability_invoke(inv.clone(), InvocationHandler::new(&invoke_operation)) {
             Ok(mr) => match mr {
                 MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
                 MiddlewareResponse::Halt(res) => return Ok(res),
@@ -225,7 +239,7 @@ mod tests {
     use super::Middleware;
     use crate::inthost::Invocation;
     use crate::inthost::{InvocationResponse, InvocationTarget};
-    use crate::middleware::MiddlewareResponse;
+    use crate::middleware::{InvocationHandler, MiddlewareResponse};
     use crate::Result;
 
     struct IncMiddleware {
@@ -243,9 +257,9 @@ mod tests {
         fn actor_invoke(
             &self,
             inv: Invocation,
-            operation: &dyn Fn(Invocation) -> InvocationResponse,
+            handler: InvocationHandler,
         ) -> Result<MiddlewareResponse> {
-            Ok(MiddlewareResponse::Continue(operation(inv)))
+            Ok(MiddlewareResponse::Continue(handler.invoke(inv)))
         }
         fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
             self.post.fetch_add(1, Ordering::SeqCst);
@@ -258,9 +272,9 @@ mod tests {
         fn capability_invoke(
             &self,
             inv: Invocation,
-            operation: &dyn Fn(Invocation) -> InvocationResponse,
+            handler: InvocationHandler,
         ) -> Result<MiddlewareResponse> {
-            Ok(MiddlewareResponse::Continue(operation(inv)))
+            Ok(MiddlewareResponse::Continue(handler.invoke(inv)))
         }
         fn capability_post_invoke(
             &self,
