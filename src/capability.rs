@@ -18,7 +18,7 @@ use libloading::Symbol;
 use std::ffi::OsStr;
 use wascc_codec::{
     capabilities::{CapabilityDescriptor, CapabilityProvider, OP_GET_CAPABILITY_DESCRIPTOR},
-    deserialize,
+    deserialize, SYSTEM_ACTOR,
 };
 
 /// Represents a native capability provider compiled as a shared object library.
@@ -106,7 +106,7 @@ impl NativeCapability {
 }
 
 fn get_descriptor(plugin: &Box<dyn CapabilityProvider>) -> Result<CapabilityDescriptor> {
-    let res = plugin.handle_call("system", OP_GET_CAPABILITY_DESCRIPTOR, &[])?;
+    let res = plugin.handle_call(SYSTEM_ACTOR, OP_GET_CAPABILITY_DESCRIPTOR, &[])?;
     let descriptor: CapabilityDescriptor = deserialize(&res)?;
     Ok(descriptor)
 }

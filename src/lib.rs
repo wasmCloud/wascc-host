@@ -81,6 +81,20 @@ extern crate log;
 #[macro_use]
 extern crate crossbeam;
 
+mod actor;
+mod authz;
+mod bus;
+mod capability;
+mod dispatch;
+pub mod errors;
+mod extras;
+mod inthost;
+#[cfg(feature = "manifest")]
+mod manifest;
+pub mod middleware;
+mod plugins;
+mod spawns;
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const REVISION: u32 = 2;
 
@@ -96,52 +110,36 @@ pub use manifest::{BindingEntry, HostManifest};
 pub use middleware::prometheus;
 
 pub use middleware::Middleware;
-pub use wapc::prelude::WasiParams;
-
-mod actor;
-mod authz;
-mod capability;
-mod dispatch;
-pub mod errors;
-mod extras;
-mod inthost;
-
-#[cfg(feature = "manifest")]
-mod manifest;
-
-pub mod middleware;
-mod plugins;
-mod router;
+pub use wapc::{prelude::WasiParams, WapcHost};
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use authz::AuthHook;
-use inthost::ACTOR_BINDING;
+use bus::MessageBus;
+use crossbeam::Sender;
 use plugins::PluginManager;
-use router::Router;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 use wascap::jwt::{Claims, Token};
-use wascc_codec::{
-    capabilities::CapabilityDescriptor,
-    core::{CapabilityConfiguration, OP_BIND_ACTOR},
-    serialize,
-};
+use wascc_codec::{capabilities::CapabilityDescriptor, SYSTEM_ACTOR};
 
 type BindingsList = Vec<(String, String, String)>;
+pub(crate) type RouteKey = (String, String); // (binding, id)
 
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
 pub struct WasccHost {
+    bus: Arc<MessageBus>,
     claims: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>,
-    router: Arc<RwLock<Router>>,
     plugins: Arc<RwLock<PluginManager>>,
     auth_hook: Arc<RwLock<Option<Box<AuthHook>>>>,
     bindings: Arc<RwLock<BindingsList>>,
-    caps: Arc<RwLock<HashMap<router::RouteKey, CapabilityDescriptor>>>,
+    caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
+    // the key to this field is the subscription subject, and not either a pk or a capid
+    terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     #[cfg(feature = "gantry")]
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
 }
@@ -151,8 +149,9 @@ impl WasccHost {
     pub fn new() -> Self {
         #[cfg(feature = "gantry")]
         let host = WasccHost {
+            terminators: Arc::new(RwLock::new(HashMap::new())),
+            bus: Arc::new(bus::new()),
             claims: Arc::new(RwLock::new(HashMap::new())),
-            router: Arc::new(RwLock::new(Router::default())),
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             auth_hook: Arc::new(RwLock::new(None)),
             bindings: Arc::new(RwLock::new(vec![])),
@@ -162,8 +161,9 @@ impl WasccHost {
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
+            terminators: Arc::new(RwLock::new(HashMap::new())),
+            bus: Arc::new(bus::new()),
             claims: Arc::new(RwLock::new(HashMap::new())),
-            router: Arc::new(RwLock::new(Router::default())),
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             auth_hook: Arc::new(RwLock::new(None)),
             bindings: Arc::new(RwLock::new(vec![])),
@@ -176,17 +176,15 @@ impl WasccHost {
 
     /// Adds an actor to the host
     pub fn add_actor(&self, actor: Actor) -> Result<()> {
-        let wg = crossbeam_utils::sync::WaitGroup::new();
         if self
-            .router
+            .claims
             .read()
             .unwrap()
-            .route_exists(ACTOR_BINDING, &actor.public_key())
+            .contains_key(&actor.public_key())
         {
-            return Err(errors::new(errors::ErrorKind::MiscHost(format!(
-                "Actor {} is already running in this host, failed to add.",
-                actor.public_key()
-            ))));
+            return Err(errors::new(errors::ErrorKind::MiscHost(
+                format!("Actor {} is already in this host. Cannot host multiple instances of the same actor in the same host", actor.public_key())
+            )));
         }
         authz::enforce_validation(&actor.token.jwt)?; // returns an `Err` if validation fails
         if !self.check_auth(&actor.token) {
@@ -196,16 +194,40 @@ impl WasccHost {
             )));
         }
 
-        info!("Adding actor {} to host", actor.public_key());
-        self.spawn_actor_and_listen(
+        authz::register_claims(
+            self.claims.clone(),
+            &actor.token.claims.subject,
+            actor.token.claims.clone(),
+        );
+
+        let wg = crossbeam_utils::sync::WaitGroup::new();
+        // Spin up a new thread that listens to "wasmbus.Mxxxx" calls on the message bus
+        spawns::spawn_actor(
             wg.clone(),
-            actor.token.claims,
+            actor.token.claims.clone(),
             actor.bytes.clone(),
             None,
             true,
-            ACTOR_BINDING.to_string(),
+            None,
+            self.bus.clone(),
+            self.middlewares.clone(),
+            self.caps.clone(),
+            self.bindings.clone(),
+            self.claims.clone(),
+            self.terminators.clone(),
         )?;
         wg.wait();
+        if actor.capabilities().contains(&extras::CAPABILITY_ID.into()) {
+            // force a binding so that there's a private actor subject on the bus for the
+            // actor to communicate with the extras provider
+            self.bind_actor(
+                &actor.public_key(),
+                extras::CAPABILITY_ID,
+                None,
+                HashMap::new(),
+            )?;
+        }
+
         Ok(())
     }
 
@@ -256,13 +278,20 @@ impl WasccHost {
         let binding = binding.unwrap_or("default");
 
         let wg = crossbeam_utils::sync::WaitGroup::new();
-        self.spawn_actor_and_listen(
+        // Spins up a new thread subscribed to the "wasmbus.{capid}.{binding}" subject
+        spawns::spawn_actor(
             wg.clone(),
             actor.token.claims,
             actor.bytes.clone(),
             Some(wasi),
             false,
-            binding.to_string(),
+            Some(binding.to_string()),
+            self.bus.clone(),
+            self.middlewares.clone(),
+            self.caps.clone(),
+            self.bindings.clone(),
+            self.claims.clone(),
+            self.terminators.clone(),
         )?;
         wg.wait();
         Ok(())
@@ -271,10 +300,10 @@ impl WasccHost {
     /// Removes an actor from the host. Notifies the actor's processing thread to terminate,
     /// which will in turn attempt to unbind that actor from all previously bound capability providers
     pub fn remove_actor(&self, pk: &str) -> Result<()> {
-        self.router
-            .write()
-            .unwrap()
-            .terminate_route(crate::inthost::ACTOR_BINDING, pk)
+        self.terminators.read().unwrap()[&bus::actor_subject(pk)]
+            .send(true)
+            .unwrap();
+        Ok(())
     }
 
     /// Replaces one running actor with another live actor with no message loss. Note that
@@ -282,7 +311,7 @@ impl WasccHost {
     /// providers (e.g. messages from subscriptions or HTTP requests) to build up in a backlog,
     /// so make sure the new actor can handle this stream of these delayed messages
     pub fn replace_actor(&self, new_actor: Actor) -> Result<()> {
-        crate::inthost::replace_actor(self.router.clone(), new_actor)
+        crate::inthost::replace_actor(self.bus.clone(), new_actor)
     }
 
     /// Adds a middleware item to the middleware processing pipeline
@@ -305,10 +334,10 @@ impl WasccHost {
     pub fn add_native_capability(&self, capability: NativeCapability) -> Result<()> {
         let capid = capability.id();
         if self
-            .router
+            .caps
             .read()
             .unwrap()
-            .route_exists(&capability.binding_name, &capability.id())
+            .contains_key(&(capability.binding_name.to_string(), capability.id()))
         {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name                
@@ -322,7 +351,15 @@ impl WasccHost {
             capability.descriptor().clone(),
         );
         let wg = crossbeam_utils::sync::WaitGroup::new();
-        self.spawn_capability_provider_and_listen(capability, wg.clone())?;
+        spawns::spawn_native_capability(
+            capability,
+            self.bus.clone(),
+            self.middlewares.clone(),
+            self.bindings.clone(),
+            self.terminators.clone(),
+            self.plugins.clone(),
+            wg.clone(),
+        )?;
         wg.wait();
         Ok(())
     }
@@ -334,8 +371,9 @@ impl WasccHost {
         binding_name: Option<String>,
     ) -> Result<()> {
         let b = binding_name.unwrap_or("default".to_string());
-        if let Some(entry) = self.router.read().unwrap().get_route(&b, capability_id) {
-            entry.terminate();
+        let subject = bus::provider_subject(capability_id, &b);
+        if let Some(terminator) = self.terminators.read().unwrap().get(&subject) {
+            terminator.send(true).unwrap();
             Ok(())
         } else {
             Err(errors::new(errors::ErrorKind::MiscHost(
@@ -343,6 +381,8 @@ impl WasccHost {
             )))
         }
     }
+
+    // TODO: make this create a subscription if the binding was successful
 
     /// Binds an actor to a capability provider with a given configuration. If the binding name
     /// is `None` then the default binding name will be used. An actor can only have one default
@@ -371,15 +411,18 @@ impl WasccHost {
             "Attempting to bind actor {} to {},{}",
             actor, &binding, capid
         );
-        match self.router.read().unwrap().get_route(&binding, capid) {
-            Some(entry) => {
-                let res = entry.invoke(inthost::gen_config_invocation(
-                    actor,
-                    capid,
-                    binding.clone(),
-                    config,
-                ))?;
-                if let Some(e) = res.error {
+
+        let tgt_subject = if (actor == capid || actor == SYSTEM_ACTOR) && capid.starts_with("M") {
+            // manually injected actor configuration
+            bus::actor_subject(actor)
+        } else {
+            bus::provider_subject(capid, &binding)
+        };
+        info!("Binding subject: {}", tgt_subject);
+        let inv = inthost::gen_config_invocation(actor, capid, binding.clone(), config);
+        match self.bus.invoke(&tgt_subject, inv) {
+            Ok(inv_r) => {
+                if let Some(e) = inv_r.error {
                     Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                         "Failed to configure {},{} - {}",
                         binding, capid, e
@@ -389,23 +432,10 @@ impl WasccHost {
                     Ok(())
                 }
             }
-            None => {
-                // If a binding is created where the actor and the capid are identical
-                // this is a manual configuration of an actor
-                if actor == capid {
-                    let cfgvals = CapabilityConfiguration {
-                        module: actor.to_string(),
-                        values: config,
-                    };
-                    let payload = serialize(&cfgvals).unwrap();
-                    self.call_actor(actor, OP_BIND_ACTOR, &payload).map(|_| ())
-                } else {
-                    Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
-                        "No such capability provider: {},{}",
-                        binding, capid
-                    ))))
-                }
-            }
+            Err(e) => Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
+                "Failed to configure {},{} - {}",
+                binding, capid, e
+            )))),
         }
     }
 
@@ -421,21 +451,21 @@ impl WasccHost {
     /// Invoke an operation handler on an actor directly. The caller is responsible for
     /// knowing ahead of time if the given actor supports the specified operation.
     pub fn call_actor(&self, actor: &str, operation: &str, msg: &[u8]) -> Result<Vec<u8>> {
-        match self.router.read().unwrap().get_route(ACTOR_BINDING, actor) {
-            Some(entry) => {
-                match entry.invoke(Invocation::new(
-                    "system".to_string(),
-                    InvocationTarget::Actor(actor.to_string()),
-                    operation,
-                    msg.to_vec(),
-                )) {
-                    Ok(resp) => Ok(resp.msg),
-                    Err(e) => Err(e),
-                }
-            }
-            None => Err(errors::new(errors::ErrorKind::MiscHost(
+        if !self.claims.read().unwrap().contains_key(actor) {
+            return Err(errors::new(errors::ErrorKind::MiscHost(
                 "No such actor".into(),
-            ))),
+            )));
+        }
+        let inv = Invocation::new(
+            SYSTEM_ACTOR.to_string(),
+            InvocationTarget::Actor(actor.to_string()),
+            operation,
+            msg.to_vec(),
+        );
+        let tgt_subject = bus::actor_subject(actor);
+        match self.bus.invoke(&tgt_subject, inv) {
+            Ok(resp) => Ok(resp.msg),
+            Err(e) => Err(e),
         }
     }
 
@@ -490,4 +520,22 @@ impl WasccHost {
         let lock = self.caps.read().unwrap();
         lock.clone()
     }
+
+    pub fn actors_by_tag(&self, tags: &[&str]) -> Vec<String> {
+        let mut actors = vec![];
+
+        for (actor, claims) in self.claims.read().unwrap().iter() {
+            if let Some(actor_tags) = claims.metadata.as_ref().and_then(|m| m.tags.as_ref()) {
+                if tags.iter().all(|&t| actor_tags.contains(&t.to_string())) {
+                    actors.push(actor.to_string())
+                }
+            }
+        }
+
+        actors
+    }
+}
+
+pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
+    (binding.to_string(), id.to_string())
 }

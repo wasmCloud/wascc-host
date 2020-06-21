@@ -1,0 +1,17 @@
+# This host is to contain nothing but the echo server actor.
+# NOTE that the HTTP server provider is NOT included in this host.
+# Ensure that you launch host2.yaml and host3.yaml before launching this one.
+---
+    actors:
+        - ./examples/.assets/echo.wasm
+    capabilities: []
+    bindings:
+        - actor: "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2"
+          capability: "wascc:http_server"
+          values:
+            PORT: "8081"
+        - actor: "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2"
+          capability: "wascc:http_server"
+          values:
+            PORT: "8082"
+    

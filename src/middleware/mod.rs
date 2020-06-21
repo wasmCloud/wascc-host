@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::Result;
-use crate::{plugins::PluginManager, router::Router, Invocation, InvocationResponse};
+use crate::{plugins::PluginManager, Invocation, InvocationResponse};
 use std::sync::Arc;
 use std::sync::RwLock;
 use wapc::WapcHost;
@@ -59,11 +59,11 @@ impl<'a> InvocationHandler<'a> {
     }
 }
 
-pub(crate) fn invoke_capability(
+/// Follows a chain of middleware, ultimately executing the native plugin
+pub(crate) fn invoke_native_capability(
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
-    plugins: Arc<RwLock<PluginManager>>,
-    router: Arc<RwLock<Router>>,
     inv: Invocation,
+    plugins: Arc<RwLock<PluginManager>>,
 ) -> Result<InvocationResponse> {
     let inv = match run_capability_pre_invoke(inv.clone(), &middlewares.read().unwrap()) {
         Ok(i) => i,
@@ -73,12 +73,35 @@ pub(crate) fn invoke_capability(
         }
     };
 
-    match run_capability_invoke(
-        &middlewares.read().unwrap(),
-        &plugins.read().unwrap(),
-        &router,
-        inv,
-    ) {
+    match run_capability_invoke(&middlewares.read().unwrap(), &plugins.read().unwrap(), inv) {
+        Ok(response) => {
+            match run_capability_post_invoke(response.clone(), &middlewares.read().unwrap()) {
+                Ok(r) => Ok(r),
+                Err(e) => {
+                    error!("Middleware failure: {}", e);
+                    Ok(response)
+                }
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Follows a chain of middleware, ultimately executing a portable capability provider function
+pub(crate) fn invoke_portable_capability(
+    middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
+    inv: Invocation,
+    guest: &WapcHost,
+) -> Result<InvocationResponse> {
+    let inv = match run_capability_pre_invoke(inv.clone(), &middlewares.read().unwrap()) {
+        Ok(i) => i,
+        Err(e) => {
+            error!("Middleware failure: {}", e);
+            inv
+        }
+    };
+
+    match run_portable_capability_invoke(&middlewares.read().unwrap(), inv, guest) {
         Ok(response) => {
             match run_capability_post_invoke(response.clone(), &middlewares.read().unwrap()) {
                 Ok(r) => Ok(r),
@@ -192,12 +215,39 @@ pub(crate) fn run_capability_pre_invoke(
 pub(crate) fn run_capability_invoke(
     middlewares: &[Box<dyn Middleware>],
     plugins: &PluginManager,
-    router: &Arc<RwLock<Router>>,
     inv: Invocation,
 ) -> Result<InvocationResponse> {
-    let invoke_operation = |inv: Invocation| match plugins.call(router.clone(), &inv) {
+    let invoke_operation = |inv: Invocation| match plugins.call(&inv) {
         Ok(r) => r,
         Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke capability: {}", e)),
+    };
+
+    let mut cur_resp = Ok(InvocationResponse::error(
+        &inv,
+        "No middleware invoked the operation",
+    ));
+
+    for m in middlewares.iter() {
+        match m.capability_invoke(inv.clone(), InvocationHandler::new(&invoke_operation)) {
+            Ok(mr) => match mr {
+                MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
+                MiddlewareResponse::Halt(res) => return Ok(res),
+            },
+            Err(e) => return Err(e),
+        }
+    }
+
+    cur_resp
+}
+
+pub(crate) fn run_portable_capability_invoke(
+    middlewares: &[Box<dyn Middleware>],
+    inv: Invocation,
+    guest: &WapcHost,
+) -> Result<InvocationResponse> {
+    let invoke_operation = |inv: Invocation| match guest.call(&inv.operation, &inv.msg) {
+        Ok(v) => InvocationResponse::success(&inv, v),
+        Err(e) => InvocationResponse::error(&inv, &format!("failed to invoke capability: {}", e)),
     };
 
     let mut cur_resp = Ok(InvocationResponse::error(
