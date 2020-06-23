@@ -27,8 +27,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     host.add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
     host.add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
     host.add_native_capability(NativeCapability::from_file(
-        // "./examples/.assets/libwascc_httpsrv.so",
-        "./examples/.assets/libwascc_httpsrv.dylib",
+        "./examples/.assets/libwascc_httpsrv.so",
         None,
     )?)?;
 

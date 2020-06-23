@@ -307,7 +307,7 @@ impl Middleware for PrometheusMiddleware {
         inv: Invocation,
         handler: InvocationHandler,
     ) -> Result<MiddlewareResponse> {
-        Ok(handler.operation(inv))
+        Ok(MiddlewareResponse::Continue(handler.invoke(inv)))
     }
 
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
@@ -326,7 +326,7 @@ impl Middleware for PrometheusMiddleware {
         inv: Invocation,
         handler: InvocationHandler,
     ) -> Result<MiddlewareResponse> {
-        Ok(handler.operation(inv))
+        Ok(MiddlewareResponse::Continue(handler.invoke(inv)))
     }
 
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
