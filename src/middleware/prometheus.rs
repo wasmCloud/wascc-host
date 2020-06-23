@@ -90,6 +90,7 @@
 //! [docker_compose]: https://docs.docker.com/compose/
 //! [grafana]: https://grafana.com/
 
+use crate::middleware::{InvocationHandler, MiddlewareResponse};
 use crate::{errors, Invocation, InvocationResponse, InvocationTarget, Middleware, Result};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
@@ -301,6 +302,14 @@ impl Middleware for PrometheusMiddleware {
         Ok(inv)
     }
 
+    fn actor_invoke(
+        &self,
+        inv: Invocation,
+        handler: InvocationHandler,
+    ) -> Result<MiddlewareResponse> {
+        Ok(handler.operation(inv))
+    }
+
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
         post_invoke_measure_inv_time(&self.metrics, &self.registry, &response);
         Ok(response)
@@ -310,6 +319,14 @@ impl Middleware for PrometheusMiddleware {
         pre_invoke_count_inv(&self.metrics, &self.registry, &inv.target, &inv.operation);
         pre_invoke_measure_inv_time(&self.metrics, &inv);
         Ok(inv)
+    }
+
+    fn capability_invoke(
+        &self,
+        inv: Invocation,
+        handler: InvocationHandler,
+    ) -> Result<MiddlewareResponse> {
+        Ok(handler.operation(inv))
     }
 
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
