@@ -90,7 +90,7 @@
 //! [docker_compose]: https://docs.docker.com/compose/
 //! [grafana]: https://grafana.com/
 
-use crate::{errors, Invocation, InvocationResponse, WasccEntity, Middleware, Result};
+use crate::{errors, Invocation, InvocationResponse, Middleware, Result, WasccEntity};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
@@ -654,11 +654,7 @@ fn register_gauge(
 }
 
 // set new average invocation time across all actors or capabilities
-fn set_new_total_avg(
-    metrics: &RwLockWriteGuard<Metrics>,
-    target: &WasccEntity,
-    inv_time: u128,
-) {
+fn set_new_total_avg(metrics: &RwLockWriteGuard<Metrics>, target: &WasccEntity, inv_time: u128) {
     match target {
         WasccEntity::Actor(_) => {
             metrics.actor_total_average_inv_time.set(calc_avg(
@@ -817,7 +813,7 @@ mod tests {
     use crate::middleware::prometheus::{
         PrometheusConfig, PrometheusMiddleware, PushgatewayConfig,
     };
-    use crate::{Invocation, InvocationResponse, WasccEntity, Middleware};
+    use crate::{Invocation, InvocationResponse, Middleware, WasccEntity};
     use mockito::{mock, Matcher};
     use rand::random;
     use std::net::SocketAddr;
