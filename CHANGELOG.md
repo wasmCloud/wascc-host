@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - In Progress
+
+This release includes several lattice-related enhancements as well as some security and stability improvements.
+
+### Changed
+
+* The `Invocation` type now includes its own set of claims that must be verified by receiving code. This prevents invocations from being forged on the wire in the case of intrusion.
+
+### Added
+
+* Each wascc-host instance now generates its own unique signing key (of type server, nkey prefix is `N` for "node"). This signing key is used to mint forge-proof invocations for transmission over the lattice.
+* All wascc-hosts in lattice mode will now perform an antiforgery check on inbound invocations.
+
+### Removed
+
+TBD
+
 ## [0.8.0] - 2020 JUN 8
 
 This release was primarily to accomodate the upgrade to the newest version of the [waSCC Codec](../wascc-codec).

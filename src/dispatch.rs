@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use crate::bus::MessageBus;
-use crate::inthost::{Invocation, InvocationTarget};
+use crate::inthost::{Invocation, WasccEntity};
 use std::{error::Error, sync::Arc};
 
+use wascap::prelude::KeyPair;
 use wascc_codec::capabilities::Dispatcher;
 
 /// A dispatcher is given to each capability provider, allowing it to send
@@ -25,13 +26,17 @@ use wascc_codec::capabilities::Dispatcher;
 pub(crate) struct WasccNativeDispatcher {
     bus: Arc<MessageBus>,
     capid: String,
+    binding: String,
+    hk: Arc<KeyPair>,
 }
 
 impl WasccNativeDispatcher {
-    pub fn new(bus: Arc<MessageBus>, capid: &str) -> Self {
+    pub fn new(hk: Arc<KeyPair>, bus: Arc<MessageBus>, capid: &str, binding: &str) -> Self {
         WasccNativeDispatcher {
             bus,
             capid: capid.to_string(),
+            binding: binding.to_string(),
+            hk,
         }
     }
 }
@@ -45,8 +50,12 @@ impl Dispatcher for WasccNativeDispatcher {
             msg.len()
         );
         let inv = Invocation::new(
-            self.capid.to_string(),
-            InvocationTarget::Actor(actor.to_string()),
+            &self.hk,
+            WasccEntity::Capability {
+                capid: self.capid.to_string(),
+                binding: self.binding.to_string(),
+            },
+            WasccEntity::Actor(actor.to_string()),
             op,
             msg.to_vec(),
         );
