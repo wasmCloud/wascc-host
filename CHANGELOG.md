@@ -12,6 +12,7 @@ This release includes several lattice-related enhancements as well as some secur
 ### Changed
 
 * The `Invocation` type now includes its own set of claims that must be verified by receiving code. This prevents invocations from being forged on the wire in the case of intrusion.
+* The `InvocationTarget` enum has been renamed to `WasccEntity` to better clarify the expected communications patterns
 
 ### Added
 
