@@ -73,7 +73,8 @@ pub(crate) fn invoke_native_capability(
         }
     };
 
-    match run_capability_invoke(&middlewares.read().unwrap(), &plugins.read().unwrap(), inv) {
+    match run_native_capability_invoke(&middlewares.read().unwrap(), &plugins.read().unwrap(), inv)
+    {
         Ok(response) => {
             match run_capability_post_invoke(response.clone(), &middlewares.read().unwrap()) {
                 Ok(r) => Ok(r),
@@ -166,22 +167,7 @@ fn run_actor_invoke(
         Err(e) => InvocationResponse::error(&inv, &format!("failed to invoke actor: {}", e)),
     };
 
-    let mut cur_resp = Ok(InvocationResponse::error(
-        &inv,
-        "No middleware invoked the operation",
-    ));
-
-    for m in middlewares.iter() {
-        match m.actor_invoke(inv.clone(), InvocationHandler::new(&invoke_operation)) {
-            Ok(mr) => match mr {
-                MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
-                MiddlewareResponse::Halt(res) => return Ok(res),
-            },
-            Err(e) => return Err(e),
-        }
-    }
-
-    cur_resp
+    run_invoke(middlewares, inv, &invoke_operation)
 }
 
 fn run_actor_post_invoke(
@@ -212,32 +198,17 @@ pub(crate) fn run_capability_pre_invoke(
     Ok(cur_inv)
 }
 
-pub(crate) fn run_capability_invoke(
+pub(crate) fn run_native_capability_invoke(
     middlewares: &[Box<dyn Middleware>],
     plugins: &PluginManager,
     inv: Invocation,
 ) -> Result<InvocationResponse> {
     let invoke_operation = |inv: Invocation| match plugins.call(&inv) {
         Ok(r) => r,
-        Err(e) => InvocationResponse::error(&inv, &format!("Failed to invoke capability: {}", e)),
+        Err(e) => InvocationResponse::error(&inv, &format!("failed to invoke capability: {}", e)),
     };
 
-    let mut cur_resp = Ok(InvocationResponse::error(
-        &inv,
-        "No middleware invoked the operation",
-    ));
-
-    for m in middlewares.iter() {
-        match m.capability_invoke(inv.clone(), InvocationHandler::new(&invoke_operation)) {
-            Ok(mr) => match mr {
-                MiddlewareResponse::Continue(res) => cur_resp = Ok(res),
-                MiddlewareResponse::Halt(res) => return Ok(res),
-            },
-            Err(e) => return Err(e),
-        }
-    }
-
-    cur_resp
+    run_invoke(middlewares, inv, &invoke_operation)
 }
 
 pub(crate) fn run_portable_capability_invoke(
@@ -250,6 +221,14 @@ pub(crate) fn run_portable_capability_invoke(
         Err(e) => InvocationResponse::error(&inv, &format!("failed to invoke capability: {}", e)),
     };
 
+    run_invoke(middlewares, inv, &invoke_operation)
+}
+
+fn run_invoke(
+    middlewares: &[Box<dyn Middleware>],
+    inv: Invocation,
+    invoke_operation: &dyn Fn(Invocation) -> InvocationResponse,
+) -> Result<InvocationResponse> {
     let mut cur_resp = Ok(InvocationResponse::error(
         &inv,
         "No middleware invoked the operation",
@@ -265,7 +244,11 @@ pub(crate) fn run_portable_capability_invoke(
         }
     }
 
-    cur_resp
+    if middlewares.is_empty() {
+        Ok(invoke_operation(inv))
+    } else {
+        cur_resp
+    }
 }
 
 pub(crate) fn run_capability_post_invoke(
