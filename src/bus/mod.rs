@@ -14,6 +14,17 @@
 
 pub const URL_SCHEME: &str = "wasmbus";
 
+#[cfg(feature = "lattice")]
+use crate::{BindingsList, RouteKey};
+#[cfg(feature = "lattice")]
+use std::collections::HashMap;
+#[cfg(feature = "lattice")]
+use std::sync::{Arc, RwLock};
+#[cfg(feature = "lattice")]
+use wascap::jwt::{Actor, Claims};
+#[cfg(feature = "lattice")]
+use wascc_codec::capabilities::CapabilityDescriptor;
+
 #[cfg(not(feature = "lattice"))]
 pub(crate) mod inproc;
 #[cfg(feature = "lattice")]
@@ -31,8 +42,13 @@ pub(crate) fn new() -> MessageBus {
 }
 
 #[cfg(feature = "lattice")]
-pub(crate) fn new() -> MessageBus {
-    lattice::DistributedBus::new()
+pub(crate) fn new(
+    host_id: String,
+    claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
+    caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
+    bindings: Arc<RwLock<BindingsList>>,
+) -> MessageBus {
+    lattice::DistributedBus::new(host_id, claims, caps, bindings)
 }
 
 pub(crate) fn actor_subject(actor: &str) -> String {
