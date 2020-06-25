@@ -101,7 +101,7 @@ pub const REVISION: u32 = 2;
 pub type Result<T> = std::result::Result<T, errors::Error>;
 pub use actor::Actor;
 pub use capability::NativeCapability;
-pub use inthost::{Invocation, InvocationResponse, InvocationTarget};
+pub use inthost::{Invocation, InvocationResponse, WasccEntity};
 
 #[cfg(feature = "manifest")]
 pub use manifest::{BindingEntry, HostManifest};
@@ -123,6 +123,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use wascap::jwt::{Claims, Token};
+use wascap::prelude::KeyPair;
 use wascc_codec::{capabilities::CapabilityDescriptor, SYSTEM_ACTOR};
 
 type BindingsList = Vec<(String, String, String)>;
@@ -142,6 +143,7 @@ pub struct WasccHost {
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     #[cfg(feature = "gantry")]
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
+    key: KeyPair,
 }
 
 impl WasccHost {
@@ -158,6 +160,7 @@ impl WasccHost {
             caps: Arc::new(RwLock::new(HashMap::new())),
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
+            key: KeyPair::new_server(),
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
@@ -169,7 +172,9 @@ impl WasccHost {
             bindings: Arc::new(RwLock::new(vec![])),
             middlewares: Arc::new(RwLock::new(vec![])),
             caps: Arc::new(RwLock::new(HashMap::new())),
+            key: KeyPair::new_server(),
         };
+        info!("Host ID is {}", host.key.public_key());
         host.ensure_extras().unwrap();
         host
     }
@@ -215,6 +220,7 @@ impl WasccHost {
             self.bindings.clone(),
             self.claims.clone(),
             self.terminators.clone(),
+            self.key.clone(),
         )?;
         wg.wait();
         if actor.capabilities().contains(&extras::CAPABILITY_ID.into()) {
@@ -292,6 +298,7 @@ impl WasccHost {
             self.bindings.clone(),
             self.claims.clone(),
             self.terminators.clone(),
+            self.key.clone(),
         )?;
         wg.wait();
         Ok(())
@@ -311,7 +318,7 @@ impl WasccHost {
     /// providers (e.g. messages from subscriptions or HTTP requests) to build up in a backlog,
     /// so make sure the new actor can handle this stream of these delayed messages
     pub fn replace_actor(&self, new_actor: Actor) -> Result<()> {
-        crate::inthost::replace_actor(self.bus.clone(), new_actor)
+        crate::inthost::replace_actor(&self.key, self.bus.clone(), new_actor)
     }
 
     /// Adds a middleware item to the middleware processing pipeline
@@ -359,6 +366,7 @@ impl WasccHost {
             self.terminators.clone(),
             self.plugins.clone(),
             wg.clone(),
+            Arc::new(self.key.clone()),
         )?;
         wg.wait();
         Ok(())
@@ -419,7 +427,7 @@ impl WasccHost {
             bus::provider_subject(capid, &binding)
         };
         info!("Binding subject: {}", tgt_subject);
-        let inv = inthost::gen_config_invocation(actor, capid, binding.clone(), config);
+        let inv = inthost::gen_config_invocation(&self.key, actor, capid, binding.clone(), config);
         match self.bus.invoke(&tgt_subject, inv) {
             Ok(inv_r) => {
                 if let Some(e) = inv_r.error {
@@ -457,8 +465,9 @@ impl WasccHost {
             )));
         }
         let inv = Invocation::new(
-            SYSTEM_ACTOR.to_string(),
-            InvocationTarget::Actor(actor.to_string()),
+            &self.key,
+            WasccEntity::Actor(SYSTEM_ACTOR.to_string()),
+            WasccEntity::Actor(actor.to_string()),
             operation,
             msg.to_vec(),
         );

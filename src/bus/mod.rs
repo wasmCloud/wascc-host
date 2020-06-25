@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub const URL_SCHEME: &str = "wasmbus";
+
 #[cfg(not(feature = "lattice"))]
 pub(crate) mod inproc;
 #[cfg(feature = "lattice")]
@@ -45,8 +47,8 @@ pub(crate) fn provider_subject(capid: &str, binding: &str) -> String {
 // for the capability IDs, e.g. "wascc:messaging" or "gpio:relay". To
 // accommodate message broker subjects that might not work with the ":"
 // character, we normalize the segments to dot-separated.
-fn normalize_capid(capid: &str) -> String {
-    capid.to_lowercase().replace(":", ".")
+pub(crate) fn normalize_capid(capid: &str) -> String {
+    capid.to_lowercase().replace(":", ".").replace(" ", "_")
 }
 
 pub(crate) fn provider_subject_bound_actor(
