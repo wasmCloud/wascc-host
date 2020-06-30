@@ -192,7 +192,7 @@ impl WasccHost {
             caps,
             key: key,
         };
-        info!("Host ID is {}", host.key.public_key());
+        info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
         host.ensure_extras().unwrap();
         host
     }
