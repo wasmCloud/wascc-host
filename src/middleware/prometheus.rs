@@ -90,6 +90,7 @@
 //! [docker_compose]: https://docs.docker.com/compose/
 //! [grafana]: https://grafana.com/
 
+use crate::middleware::{InvocationHandler, MiddlewareResponse};
 use crate::{errors, Invocation, InvocationResponse, Middleware, Result, WasccEntity};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
@@ -301,6 +302,14 @@ impl Middleware for PrometheusMiddleware {
         Ok(inv)
     }
 
+    fn actor_invoke(
+        &self,
+        inv: Invocation,
+        handler: InvocationHandler,
+    ) -> Result<MiddlewareResponse> {
+        Ok(MiddlewareResponse::Continue(handler.invoke(inv)))
+    }
+
     fn actor_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
         post_invoke_measure_inv_time(&self.metrics, &self.registry, &response);
         Ok(response)
@@ -310,6 +319,14 @@ impl Middleware for PrometheusMiddleware {
         pre_invoke_count_inv(&self.metrics, &self.registry, &inv.target, &inv.operation);
         pre_invoke_measure_inv_time(&self.metrics, &inv);
         Ok(inv)
+    }
+
+    fn capability_invoke(
+        &self,
+        inv: Invocation,
+        handler: InvocationHandler,
+    ) -> Result<MiddlewareResponse> {
+        Ok(MiddlewareResponse::Continue(handler.invoke(inv)))
     }
 
     fn capability_post_invoke(&self, response: InvocationResponse) -> Result<InvocationResponse> {
@@ -819,6 +836,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::ops::Mul;
     use std::time::Duration;
+    use wascap::prelude::KeyPair;
 
     const CAPID1: &str = "capid1";
     const CAPID2: &str = "capid2";
@@ -834,16 +852,21 @@ mod tests {
 
     fn actor_invocation(actor: &str, operation: &str) -> Invocation {
         Invocation::new(
-            "actor_origin".to_owned(),
-            WasccEntity::Actor(actor.to_owned()),
+            &KeyPair::new_module(),
+            WasccEntity::Actor(actor.to_string()),
+            WasccEntity::Actor(actor.to_string()),
             operation,
-            "actor_msg".into(),
+            "cap_msg".into(),
         )
     }
 
     fn cap_invocation(capid: &str, binding: &str, operation: &str) -> Invocation {
         Invocation::new(
-            "cap_origin".to_owned(),
+            &KeyPair::new_module(),
+            WasccEntity::Capability {
+                capid: capid.to_owned(),
+                binding: binding.to_owned(),
+            },
             WasccEntity::Capability {
                 capid: capid.to_owned(),
                 binding: binding.to_owned(),
