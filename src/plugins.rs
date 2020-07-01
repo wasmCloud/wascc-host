@@ -16,7 +16,7 @@ use crate::capability::NativeCapability;
 use crate::dispatch::WasccNativeDispatcher;
 use crate::errors::{self, ErrorKind};
 use crate::inthost::Invocation;
-use crate::inthost::{InvocationResponse, InvocationTarget};
+use crate::inthost::{InvocationResponse, WasccEntity};
 use crate::{route_key, Result, RouteKey};
 use std::collections::HashMap;
 
@@ -47,11 +47,16 @@ impl PluginManager {
     }
 
     pub fn call(&self, inv: &Invocation) -> Result<InvocationResponse> {
-        if let InvocationTarget::Capability { capid, binding } = &inv.target {
+        if let WasccEntity::Capability { capid, binding } = &inv.target {
             let route_key = route_key(&binding, &capid);
+            let actor = if let WasccEntity::Actor(s) = &inv.origin {
+                s.to_string()
+            } else {
+                "SHOULD NEVER SEND CAP-ORIGIN INVOCATION TO ANOTHER CAP".to_string()
+            };
             match self.plugins.get(&route_key) {
                 // native capability is registered via plugin
-                Some(c) => match c.plugin.handle_call(&inv.origin, &inv.operation, &inv.msg) {
+                Some(c) => match c.plugin.handle_call(&actor, &inv.operation, &inv.msg) {
                     Ok(msg) => Ok(InvocationResponse::success(inv, msg)),
                     Err(e) => Err(errors::new(errors::ErrorKind::HostCallFailure(e))),
                 },

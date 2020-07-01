@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use wapc::prelude::*;
-use wascap::jwt::Claims;
+use wascap::{jwt::Claims, prelude::KeyPair};
 use wascc_codec::{
     capabilities::{CapabilityDescriptor, OP_GET_CAPABILITY_DESCRIPTOR},
     core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
@@ -55,16 +55,17 @@ pub(crate) fn spawn_actor(
     bindings: Arc<RwLock<BindingsList>>,
     claimsmap: ClaimsMap,
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
+    hk: KeyPair,
 ) -> Result<()> {
     let c = claims.clone();
     let b = bus.clone();
     let m = mids.clone();
     let bi = binding.clone();
-
+    let hostkey = hk.clone();
     thread::spawn(move || {
         let mut guest = WapcHost::new(
             move |_id, bd, ns, op, payload| {
-                wapc_host_callback(c.clone(), bus.clone(), bd, ns, op, payload)
+                wapc_host_callback(hk.clone(), c.clone(), bus.clone(), bd, ns, op, payload)
             },
             &buf,
             wasi,
@@ -135,7 +136,7 @@ pub(crate) fn spawn_actor(
                         // TODO: unsubscribe all the actor-specific subscriptions for this provider
                         unbind_all_from_cap(bindings.clone(), &d.unwrap().id, bi.unwrap().as_ref());
                     } else {
-                        deconfigure_actor(bus.clone(), bindings.clone(), &claims.subject);
+                        deconfigure_actor(hostkey.clone(),bus.clone(), bindings.clone(), &claims.subject);
                         authz::unregister_claims(claimsmap, &claims.subject);
                     }
                     return "".to_string()
@@ -154,6 +155,7 @@ pub(crate) fn spawn_native_capability(
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     plugins: Arc<RwLock<PluginManager>>,
     wg: WaitGroup,
+    hk: Arc<KeyPair>,
 ) -> Result<()> {
     let capid = capability.id().to_string();
     let binding = capability.binding_name.to_string();
@@ -168,7 +170,7 @@ pub(crate) fn spawn_native_capability(
         let subscribe_subject = bus::provider_subject(&capid, &binding);
 
         let _ = bus.subscribe(&subscribe_subject, inv_s, resp_r).unwrap();
-        let dispatcher = WasccNativeDispatcher::new(bus.clone(), &capid);
+        let dispatcher = WasccNativeDispatcher::new(hk, bus.clone(), &capid, &binding);
         plugins
             .write()
             .unwrap()

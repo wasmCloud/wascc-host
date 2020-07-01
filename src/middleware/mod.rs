@@ -270,10 +270,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::Middleware;
-    use crate::inthost::Invocation;
-    use crate::inthost::{InvocationResponse, InvocationTarget};
+    use crate::inthost::{Invocation, InvocationResponse, WasccEntity};
     use crate::middleware::{InvocationHandler, MiddlewareResponse};
     use crate::Result;
+    use wascap::prelude::KeyPair;
 
     struct IncMiddleware {
         pre: &'static AtomicUsize,
@@ -331,11 +331,13 @@ mod tests {
             cap_pre: &CAP_PRE,
             cap_post: &CAP_POST,
         };
+        let hk = KeyPair::new_server();
 
         let mids: Vec<Box<dyn Middleware>> = vec![Box::new(inc_mid)];
         let inv = Invocation::new(
-            "test".to_string(),
-            InvocationTarget::Capability {
+            &hk,
+            WasccEntity::Actor("test".to_string()),
+            WasccEntity::Capability {
                 capid: "testing:sample".to_string(),
                 binding: "default".to_string(),
             },

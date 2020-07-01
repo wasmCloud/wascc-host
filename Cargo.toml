@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -29,10 +29,12 @@ hyper = { version = "0.13", optional = true }
 tokio = { version = "0.2", features = ["macros"], optional = true }
 wapc = "0.8.0"
 wascc-codec = "0.7.1"
-wascap = "0.4.5"
+wascap = "0.4.7"
 log = "0.4.8"
 rand = "0.7.3"
 env_logger = "0.7.1"
+ring = "0.16.15"
+data-encoding = "2.2.1"
 
 uuid = { version = "0.8", features = ["serde", "v4"] }
 

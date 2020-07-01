@@ -91,7 +91,7 @@
 //! [grafana]: https://grafana.com/
 
 use crate::middleware::{InvocationHandler, MiddlewareResponse};
-use crate::{errors, Invocation, InvocationResponse, InvocationTarget, Middleware, Result};
+use crate::{errors, Invocation, InvocationResponse, Middleware, Result, WasccEntity};
 use hyper::header::CONTENT_TYPE;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
@@ -183,7 +183,7 @@ pub struct BasicAuthentication {
 struct InvocationState {
     start_time: Instant,
     operation: String,
-    target: InvocationTarget,
+    target: WasccEntity,
     /// Key to find metrics for a capability or an actor
     metric_key: String,
     /// Key to find metrics for an operation on a capability or an actor
@@ -353,13 +353,13 @@ impl From<prometheus::Error> for errors::Error {
 fn pre_invoke_count_inv(
     metrics: &Arc<RwLock<Metrics>>,
     registry: &Arc<RwLock<Registry>>,
-    target: &InvocationTarget,
+    target: &WasccEntity,
     operation: &str,
 ) {
     let mut metrics = metrics.write().unwrap();
 
     match target {
-        InvocationTarget::Actor(actor) => {
+        WasccEntity::Actor(actor) => {
             metrics.actor_total_inv_count.inc();
 
             let actor_key = get_metric_key(target);
@@ -395,7 +395,7 @@ fn pre_invoke_count_inv(
                 )
             }
         }
-        InvocationTarget::Capability { capid, binding } => {
+        WasccEntity::Capability { capid, binding } => {
             metrics.cap_total_inv_count.inc();
 
             let cap_key = get_metric_key(target);
@@ -457,14 +457,14 @@ fn register_counter(
     counters.insert(counter_lookup_key, counter);
 }
 
-fn get_operation_metric_key(target: &InvocationTarget, operation: &str) -> String {
+fn get_operation_metric_key(target: &WasccEntity, operation: &str) -> String {
     get_metric_key(target) + operation
 }
 
-fn get_metric_key(target: &InvocationTarget) -> String {
+fn get_metric_key(target: &WasccEntity) -> String {
     match target {
-        InvocationTarget::Actor(actor) => actor.clone(),
-        InvocationTarget::Capability { capid, binding } => capid.clone() + binding,
+        WasccEntity::Actor(actor) => actor.clone(),
+        WasccEntity::Capability { capid, binding } => capid.clone() + binding,
     }
 }
 
@@ -511,7 +511,7 @@ fn post_invoke_measure_inv_time(
 
         // was an actor or a capability invoked?
         match &state.target {
-            InvocationTarget::Actor(actor) => {
+            WasccEntity::Actor(actor) => {
                 if let Some(gauge) = metrics.actor_average_inv_time.get(&state.metric_key) {
                     set_gauge_avg(
                         gauge,
@@ -568,7 +568,7 @@ fn post_invoke_measure_inv_time(
                     );
                 }
             }
-            InvocationTarget::Capability { capid, binding } => {
+            WasccEntity::Capability { capid, binding } => {
                 if let Some(gauge) = metrics.cap_average_inv_time.get(&state.metric_key) {
                     set_gauge_avg(
                         gauge,
@@ -671,13 +671,9 @@ fn register_gauge(
 }
 
 // set new average invocation time across all actors or capabilities
-fn set_new_total_avg(
-    metrics: &RwLockWriteGuard<Metrics>,
-    target: &InvocationTarget,
-    inv_time: u128,
-) {
+fn set_new_total_avg(metrics: &RwLockWriteGuard<Metrics>, target: &WasccEntity, inv_time: u128) {
     match target {
-        InvocationTarget::Actor(_) => {
+        WasccEntity::Actor(_) => {
             metrics.actor_total_average_inv_time.set(calc_avg(
                 metrics.moving_average_window_size,
                 metrics.actor_total_inv_count.get(),
@@ -685,7 +681,7 @@ fn set_new_total_avg(
                 metrics.actor_total_average_inv_time.get(),
             ));
         }
-        InvocationTarget::Capability {
+        WasccEntity::Capability {
             capid: _,
             binding: _,
         } => {
@@ -834,12 +830,13 @@ mod tests {
     use crate::middleware::prometheus::{
         PrometheusConfig, PrometheusMiddleware, PushgatewayConfig,
     };
-    use crate::{Invocation, InvocationResponse, InvocationTarget, Middleware};
+    use crate::{Invocation, InvocationResponse, Middleware, WasccEntity};
     use mockito::{mock, Matcher};
     use rand::random;
     use std::net::SocketAddr;
     use std::ops::Mul;
     use std::time::Duration;
+    use wascap::prelude::KeyPair;
 
     const CAPID1: &str = "capid1";
     const CAPID2: &str = "capid2";
@@ -855,17 +852,22 @@ mod tests {
 
     fn actor_invocation(actor: &str, operation: &str) -> Invocation {
         Invocation::new(
-            "actor_origin".to_owned(),
-            InvocationTarget::Actor(actor.to_owned()),
+            &KeyPair::new_module(),
+            WasccEntity::Actor(actor.to_string()),
+            WasccEntity::Actor(actor.to_string()),
             operation,
-            "actor_msg".into(),
+            "cap_msg".into(),
         )
     }
 
     fn cap_invocation(capid: &str, binding: &str, operation: &str) -> Invocation {
         Invocation::new(
-            "cap_origin".to_owned(),
-            InvocationTarget::Capability {
+            &KeyPair::new_module(),
+            WasccEntity::Capability {
+                capid: capid.to_owned(),
+                binding: binding.to_owned(),
+            },
+            WasccEntity::Capability {
                 capid: capid.to_owned(),
                 binding: binding.to_owned(),
             },

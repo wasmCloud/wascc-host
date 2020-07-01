@@ -77,15 +77,25 @@ impl DistributedBus {
     }
 }
 
+// This function is invoked any time an invocation is _received_ by the message bus
 fn handle_invocation(
     msg: &nats::Message,
     sender: Sender<Invocation>,
     receiver: Receiver<InvocationResponse>,
 ) {
     let inv = invocation_from_msg(msg);
-    sender.send(inv).unwrap();
-    let inv_r = receiver.recv().unwrap();
-    msg.respond(serialize(inv_r).unwrap()).unwrap();
+    //TODO: when we implement the issue, check that the invocation's origin host is not in the block list
+    if let Err(e) = inv.validate_antiforgery() {
+        error!("Invocation Antiforgery check failure: {}", e);
+        let inv_r = InvocationResponse::error(&inv, &format!("Antiforgery check failure: {}", e));
+        msg.respond(serialize(inv_r).unwrap()).unwrap();
+    // TODO: when we implement the issue, publish an antiforgery check event on wasmbus.events
+    // TODO: when we implement the issue, add the host origin of the invocation to the global lattice block list
+    } else {
+        sender.send(inv).unwrap();
+        let inv_r = receiver.recv().unwrap();
+        msg.respond(serialize(inv_r).unwrap()).unwrap();
+    }
 }
 
 fn invocation_from_msg(msg: &nats::Message) -> Invocation {
