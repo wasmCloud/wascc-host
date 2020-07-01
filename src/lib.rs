@@ -124,9 +124,13 @@ use std::{
 };
 use wascap::jwt::{Claims, Token};
 use wascap::prelude::KeyPair;
-use wascc_codec::{capabilities::CapabilityDescriptor, SYSTEM_ACTOR};
+use wascc_codec::{
+    capabilities::CapabilityDescriptor, core::CapabilityConfiguration, SYSTEM_ACTOR,
+};
 
-type BindingsList = Vec<(String, String, String)>;
+//type BindingsList = Vec<(String, String, String)>;
+type BindingsList = HashMap<BindingTuple, CapabilityConfiguration>;
+type BindingTuple = (String, String, String); // (from-actor, to-capid, to-binding-name)
 pub(crate) type RouteKey = (String, String); // (binding, id)
 
 /// Represents an instance of a waSCC host
@@ -149,32 +153,46 @@ pub struct WasccHost {
 impl WasccHost {
     /// Creates a new waSCC runtime host
     pub fn new() -> Self {
+        let key = KeyPair::new_server();
+        let claims = Arc::new(RwLock::new(HashMap::new()));
+        let caps = Arc::new(RwLock::new(HashMap::new()));
+        let bindings = Arc::new(RwLock::new(HashMap::new()));
+        #[cfg(feature = "lattice")]
+        let bus = bus::new(
+            key.public_key(),
+            claims.clone(),
+            caps.clone(),
+            bindings.clone(),
+        );
+        #[cfg(not(feature = "lattice"))]
+        let bus = bus::new();
+
         #[cfg(feature = "gantry")]
         let host = WasccHost {
             terminators: Arc::new(RwLock::new(HashMap::new())),
-            bus: Arc::new(bus::new()),
-            claims: Arc::new(RwLock::new(HashMap::new())),
+            bus: Arc::new(bus),
+            claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             auth_hook: Arc::new(RwLock::new(None)),
-            bindings: Arc::new(RwLock::new(vec![])),
-            caps: Arc::new(RwLock::new(HashMap::new())),
+            bindings,
+            caps,
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
-            key: KeyPair::new_server(),
+            key: key,
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
             terminators: Arc::new(RwLock::new(HashMap::new())),
-            bus: Arc::new(bus::new()),
-            claims: Arc::new(RwLock::new(HashMap::new())),
+            bus: Arc::new(bus),
+            claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             auth_hook: Arc::new(RwLock::new(None)),
-            bindings: Arc::new(RwLock::new(vec![])),
+            bindings,
             middlewares: Arc::new(RwLock::new(vec![])),
-            caps: Arc::new(RwLock::new(HashMap::new())),
-            key: KeyPair::new_server(),
+            caps,
+            key: key,
         };
-        info!("Host ID is {}", host.key.public_key());
+        info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
         host.ensure_extras().unwrap();
         host
     }
@@ -427,7 +445,13 @@ impl WasccHost {
             bus::provider_subject(capid, &binding)
         };
         info!("Binding subject: {}", tgt_subject);
-        let inv = inthost::gen_config_invocation(&self.key, actor, capid, binding.clone(), config);
+        let inv = inthost::gen_config_invocation(
+            &self.key,
+            actor,
+            capid,
+            binding.clone(),
+            config.clone(),
+        );
         match self.bus.invoke(&tgt_subject, inv) {
             Ok(inv_r) => {
                 if let Some(e) = inv_r.error {
@@ -436,7 +460,15 @@ impl WasccHost {
                         binding, capid, e
                     ))))
                 } else {
-                    self.record_binding(actor, capid, &binding)?;
+                    self.record_binding(
+                        actor,
+                        capid,
+                        &binding,
+                        &CapabilityConfiguration {
+                            module: actor.to_string(),
+                            values: config,
+                        },
+                    )?;
                     Ok(())
                 }
             }

@@ -46,7 +46,7 @@ pub(crate) fn unsub_all_bindings(
     bindings
         .read()
         .unwrap()
-        .iter()
+        .keys()
         .filter(|(_a, c, _b)| c == capid)
         .for_each(|(a, c, b)| {
             let _ = bus.unsubscribe(&bus::provider_subject_bound_actor(c, b, a));
@@ -54,9 +54,18 @@ pub(crate) fn unsub_all_bindings(
 }
 
 impl WasccHost {
-    pub(crate) fn record_binding(&self, actor: &str, capid: &str, binding: &str) -> Result<()> {
+    pub(crate) fn record_binding(
+        &self,
+        actor: &str,
+        capid: &str,
+        binding: &str,
+        config: &CapabilityConfiguration,
+    ) -> Result<()> {
         let mut lock = self.bindings.write().unwrap();
-        lock.push((actor.to_string(), capid.to_string(), binding.to_string()));
+        lock.insert(
+            (actor.to_string(), capid.to_string(), binding.to_string()),
+            config.clone(),
+        );
         trace!(
             "Actor {} successfully bound to {},{}",
             actor,
@@ -147,7 +156,7 @@ pub(crate) fn deconfigure_actor(
     let buf = serialize(&cfg).unwrap();
     let nbindings: Vec<_> = {
         let lock = bindings.read().unwrap();
-        lock.iter()
+        lock.keys()
             .filter(|(a, _cap, _bind)| a == key)
             .cloned()
             .collect()
@@ -167,7 +176,8 @@ pub(crate) fn deconfigure_actor(
 /// Removes all bindings from a capability without notifying anyone
 pub(crate) fn unbind_all_from_cap(bindings: Arc<RwLock<BindingsList>>, capid: &str, binding: &str) {
     let mut lock = bindings.write().unwrap();
-    lock.retain(|(_a, c, b)| !(c == capid) && (binding == b));
+    // (actor, capid, binding name)
+    lock.retain(|k, _| !(k.1 == capid) && (k.2 == binding));
 }
 
 pub(crate) fn remove_binding(
@@ -178,7 +188,7 @@ pub(crate) fn remove_binding(
 ) {
     // binding: (actor,  capid, binding)
     let mut lock = bindings.write().unwrap();
-    lock.retain(|(a, c, b)| !(a == actor && b == binding && c == capid));
+    lock.remove(&(actor.to_string(), capid.to_string(), binding.to_string()));
 }
 
 pub(crate) fn gen_remove_actor(
