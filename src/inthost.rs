@@ -34,7 +34,7 @@ use wapc::prelude::*;
 use wascap::{jwt::Claims, prelude::KeyPair};
 use wascc_codec::{
     capabilities::{CapabilityDescriptor, OP_GET_CAPABILITY_DESCRIPTOR},
-    core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
+    core::{CapabilityConfiguration, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
     deserialize, serialize, SYSTEM_ACTOR,
 };
 
@@ -445,9 +445,42 @@ pub(crate) fn gen_config_invocation(
     hostkey: &KeyPair,
     actor: &str,
     capid: &str,
+    claims: Claims<wascap::jwt::Actor>,
     binding: String,
     values: HashMap<String, String>,
 ) -> Invocation {
+    use wascc_codec::core::*;
+    let mut values = values.clone();
+    values.insert(
+        CONFIG_WASCC_CLAIMS_ISSUER.to_string(),
+        claims.issuer.to_string(),
+    );
+    values.insert(
+        CONFIG_WASCC_CLAIMS_CAPABILITIES.to_string(),
+        claims
+            .clone()
+            .metadata
+            .unwrap()
+            .caps
+            .unwrap_or(Vec::new())
+            .join(","),
+    );
+    values.insert(CONFIG_WASCC_CLAIMS_NAME.to_string(), claims.name());
+    values.insert(
+        CONFIG_WASCC_CLAIMS_EXPIRES.to_string(),
+        claims.expires.unwrap_or(0).to_string(),
+    );
+    values.insert(
+        CONFIG_WASCC_CLAIMS_TAGS.to_string(),
+        claims
+            .metadata
+            .as_ref()
+            .unwrap()
+            .tags
+            .as_ref()
+            .unwrap_or(&Vec::new())
+            .join(","),
+    );
     let cfgvals = CapabilityConfiguration {
         module: actor.to_string(),
         values,

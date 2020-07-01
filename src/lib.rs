@@ -408,8 +408,6 @@ impl WasccHost {
         }
     }
 
-    // TODO: make this create a subscription if the binding was successful
-
     /// Binds an actor to a capability provider with a given configuration. If the binding name
     /// is `None` then the default binding name will be used. An actor can only have one default
     /// binding per capability provider.
@@ -426,7 +424,8 @@ impl WasccHost {
                 "Attempted to bind non-existent actor".to_string(),
             )));
         }
-        if !authz::can_invoke(&claims.unwrap(), capid) {
+        let c = claims.unwrap().clone();
+        if !authz::can_invoke(&c, capid) {
             return Err(errors::new(errors::ErrorKind::Authorization(format!(
                 "Unauthorized binding: actor {} is not authorized to use capability {}.",
                 actor, capid
@@ -449,6 +448,7 @@ impl WasccHost {
             &self.key,
             actor,
             capid,
+            c.clone(),
             binding.clone(),
             config.clone(),
         );
