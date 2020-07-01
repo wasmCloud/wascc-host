@@ -458,11 +458,12 @@ pub(crate) fn gen_config_invocation(
     values.insert(
         CONFIG_WASCC_CLAIMS_CAPABILITIES.to_string(),
         claims
-            .clone()
             .metadata
+            .as_ref()
             .unwrap()
             .caps
-            .unwrap_or(Vec::new())
+            .as_ref()
+            .unwrap_or(&Vec::new())
             .join(","),
     );
     values.insert(CONFIG_WASCC_CLAIMS_NAME.to_string(), claims.name());
