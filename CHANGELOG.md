@@ -17,8 +17,10 @@ This release includes several lattice-related enhancements as well as some secur
 ### Added
 
 * Each waSCC host instance now generates its own unique signing key (of type server, nkey prefix is `N` for "node"). This signing key is used to mint forge-proof invocations for transmission over the lattice.
+* The host now announces (at `info` level) to the stdout log its version number.
 * All waSCC hosts in lattice mode will now perform an antiforgery check on inbound invocations.
 * All waSCC hosts in lattice mode will now respond to inventory requests allowing authorized clients to probe the lattice for actors, capabilities, bindings, and hosts.
+* The waSCC host will now supply a number of additional actor claims (name, capabilities, tags, expiration, and issuer) to the capability provider during the binding in the form of custom key-value pairs added to the configuration hash map. For the list of these new keys, see [waSCC Codec](../wascc-codec).
 
 ### Removed
 
