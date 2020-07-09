@@ -14,7 +14,7 @@ For more information on concepts, architecture, and tutorials, check out [wascc.
 To run the examples, simply issue the following command (assuming you have the latest version of Rust installed) from the root `wascc-host` directory:
 
 ```
-$ RUST_LOG=info,cranelift_wasm=warn cargo run --example [example name]
+$ RUST_LOG=wascc_host=info cargo run --example [example name]
 ```
 
 Where the example name is the name (without the `.rs`) of any of the examples in the examples folder.

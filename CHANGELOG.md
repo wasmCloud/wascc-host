@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.0] - In Progress
+## [0.10.0] - 2020 JUL 9
 
 This release includes several lattice-related enhancements as well as some security and stability improvements.
 
@@ -21,10 +21,6 @@ This release includes several lattice-related enhancements as well as some secur
 * All waSCC hosts in lattice mode will now perform an antiforgery check on inbound invocations.
 * All waSCC hosts in lattice mode will now respond to inventory requests allowing authorized clients to probe the lattice for actors, capabilities, bindings, and hosts.
 * The waSCC host will now supply a number of additional actor claims (name, capabilities, tags, expiration, and issuer) to the capability provider during the binding in the form of custom key-value pairs added to the configuration hash map. For the list of these new keys, see [waSCC Codec](../wascc-codec).
-
-### Removed
-
-TBD
 
 ## [0.8.0] - 2020 JUN 8
 
