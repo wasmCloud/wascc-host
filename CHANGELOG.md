@@ -13,6 +13,7 @@ This release includes several lattice-related enhancements as well as some secur
 
 * The `Invocation` type now includes its own set of claims that must be verified by receiving code. This prevents invocations from being forged on the wire in the case of intrusion.
 * The `InvocationTarget` enum has been renamed to `WasccEntity` to better clarify the expected communications patterns
+* Middleware now has the ability to indicate a stop or a short-circuit in the middleware change. The trait signature for middleware has changed and any middleware structs built against 0.9.0 will have to be upgraded.
 
 ### Added
 
