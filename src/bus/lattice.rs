@@ -229,9 +229,9 @@ fn get_connection() -> nats::Connection {
     let host = get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST);
     info!("Lattice Host: {}", host);
     let mut opts = if let Some(creds) = get_credsfile() {
-        nats::ConnectionOptions::with_credentials(creds)
+        nats::Options::with_credentials(creds)
     } else {
-        nats::ConnectionOptions::new()
+        nats::Options::new()
     };
     opts = opts.with_name("waSCC Lattice");
     opts.connect(&host).unwrap()
