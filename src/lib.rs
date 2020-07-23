@@ -109,12 +109,12 @@ pub use manifest::{BindingEntry, HostManifest};
 #[cfg(feature = "prometheus_middleware")]
 pub use middleware::prometheus;
 
+pub use authz::Authorizer;
 pub use middleware::Middleware;
 pub use wapc::{prelude::WasiParams, WapcHost};
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
-use authz::AuthHook;
 use bus::MessageBus;
 use crossbeam::Sender;
 use plugins::PluginManager;
@@ -122,10 +122,12 @@ use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-use wascap::jwt::{Claims, Token};
+use wascap::jwt::Claims;
 use wascap::prelude::KeyPair;
 use wascc_codec::{
-    capabilities::CapabilityDescriptor, core::CapabilityConfiguration, SYSTEM_ACTOR,
+    capabilities::CapabilityDescriptor,
+    core::{CapabilityConfiguration, OP_BIND_ACTOR},
+    SYSTEM_ACTOR,
 };
 
 //type BindingsList = Vec<(String, String, String)>;
@@ -139,7 +141,6 @@ pub struct WasccHost {
     bus: Arc<MessageBus>,
     claims: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>,
     plugins: Arc<RwLock<PluginManager>>,
-    auth_hook: Arc<RwLock<Option<Box<AuthHook>>>>,
     bindings: Arc<RwLock<BindingsList>>,
     caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
@@ -148,6 +149,7 @@ pub struct WasccHost {
     #[cfg(feature = "gantry")]
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
     key: KeyPair,
+    authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
 }
 
 impl WasccHost {
@@ -173,12 +175,12 @@ impl WasccHost {
             bus: Arc::new(bus),
             claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
-            auth_hook: Arc::new(RwLock::new(None)),
             bindings,
             caps,
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
             key: key,
+            authorizer: Arc::new(RwLock::new(Box::new(authz::DefaultAuthorizer::new()))),
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
@@ -186,11 +188,11 @@ impl WasccHost {
             bus: Arc::new(bus),
             claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
-            auth_hook: Arc::new(RwLock::new(None)),
             bindings,
             middlewares: Arc::new(RwLock::new(vec![])),
             caps,
             key: key,
+            authorizer: Arc::new(RwLock::new(Box::new(authz::DefaultAuthorizer::new()))),
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
         host.ensure_extras().unwrap();
@@ -239,6 +241,7 @@ impl WasccHost {
             self.claims.clone(),
             self.terminators.clone(),
             self.key.clone(),
+            self.authorizer.clone(),
         )?;
         wg.wait();
         if actor.capabilities().contains(&extras::CAPABILITY_ID.into()) {
@@ -317,8 +320,20 @@ impl WasccHost {
             self.claims.clone(),
             self.terminators.clone(),
             self.key.clone(),
+            self.authorizer.clone(),
         )?;
         wg.wait();
+        Ok(())
+    }
+
+    /// Sets the authorizer to be used by the waSCC host for supplemental authorization checks
+    /// *after* the initial claims check is performed. The authorizer can add further restrictions
+    /// to actors consuming capabilities, and can determine whether one actor is allowed to
+    /// invoke another.
+    pub fn set_authorizer(&self, auth: impl Authorizer + 'static) -> Result<()> {
+        let mut lock = self.authorizer.write().unwrap();
+        *lock = Box::new(auth);
+
         Ok(())
     }
 
@@ -342,16 +357,6 @@ impl WasccHost {
     /// Adds a middleware item to the middleware processing pipeline
     pub fn add_middleware(&self, mid: impl Middleware) {
         self.middlewares.write().unwrap().push(Box::new(mid));
-    }
-
-    /// Setting a custom authorization hook allows your code to make additional decisions
-    /// about whether or not a given actor is allowed to run within the host. The authorization
-    /// hook takes a `Token` (JSON Web Token) as input and returns a boolean indicating the validity of the module.
-    pub fn set_auth_hook<F>(&self, hook: F)
-    where
-        F: Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static,
-    {
-        *self.auth_hook.write().unwrap() = Some(Box::new(hook));
     }
 
     /// Adds a native capability provider plugin to the waSCC runtime. Note that because these capabilities are native,
@@ -425,13 +430,28 @@ impl WasccHost {
             )));
         }
         let c = claims.unwrap().clone();
-        if !authz::can_invoke(&c, capid) {
+        let binding = binding_name.unwrap_or("default".to_string());
+        if !authz::can_invoke(&c, capid, OP_BIND_ACTOR) {
             return Err(errors::new(errors::ErrorKind::Authorization(format!(
                 "Unauthorized binding: actor {} is not authorized to use capability {}.",
                 actor, capid
             ))));
+        } else {
+            if !self.authorizer.read().unwrap().can_invoke(
+                &c,
+                &WasccEntity::Capability {
+                    capid: capid.to_string(),
+                    binding: binding.to_string(),
+                },
+                OP_BIND_ACTOR,
+            ) {
+                return Err(errors::new(errors::ErrorKind::Authorization(format!(
+                    "Unauthorized binding: actor {} is not authorized to use capability {}.",
+                    actor, capid
+                ))));
+            }
         }
-        let binding = binding_name.unwrap_or("default".to_string());
+
         info!(
             "Attempting to bind actor {} to {},{}",
             actor, &binding, capid
@@ -556,12 +576,14 @@ impl WasccHost {
         authz::get_all_claims(self.claims.clone())
     }
 
-    /// Returns the list of capability providers registered in the host
+    /// Returns the list of capability providers registered in the host. The key is a tuple of (binding, capability ID)
     pub fn capabilities(&self) -> HashMap<(String, String), CapabilityDescriptor> {
         let lock = self.caps.read().unwrap();
         lock.clone()
     }
 
+    /// Returns the list of actors in the host that contain all of the tags in the
+    /// supplied parameter
     pub fn actors_by_tag(&self, tags: &[&str]) -> Vec<String> {
         let mut actors = vec![];
 
@@ -574,6 +596,21 @@ impl WasccHost {
         }
 
         actors
+    }
+
+    /// Attempts to perform a graceful shutdown of the host by removing all actors in
+    /// the host and then removing all capability providers. This function is not guaranteed to
+    /// block and wait for the shutdown to finish
+    pub fn shutdown(&self) -> Result<()> {
+        let actors = self.actors();
+        for (pk, _claims) in actors {
+            self.remove_actor(&pk)?;
+        }
+        let caps = self.capabilities();
+        for (binding, capid) in caps.keys() {
+            self.remove_native_capability(&capid, Some(binding.to_string()))?;
+        }
+        Ok(())
     }
 }
 

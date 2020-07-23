@@ -19,8 +19,8 @@ use crate::inthost::*;
 use crate::BindingsList;
 use crate::{authz, middleware, NativeCapability};
 use crate::{
-    bus::MessageBus, dispatch::WasccNativeDispatcher, plugins::PluginManager, Invocation,
-    InvocationResponse, Middleware,
+    bus::MessageBus, dispatch::WasccNativeDispatcher, plugins::PluginManager, Authorizer,
+    Invocation, InvocationResponse, Middleware,
 };
 use authz::ClaimsMap;
 use crossbeam::{Receiver, Sender};
@@ -56,16 +56,27 @@ pub(crate) fn spawn_actor(
     claimsmap: ClaimsMap,
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     hk: KeyPair,
+    auth: Arc<RwLock<Box<dyn Authorizer>>>,
 ) -> Result<()> {
     let c = claims.clone();
     let b = bus.clone();
     let m = mids.clone();
     let bi = binding.clone();
     let hostkey = hk.clone();
+    let authorizer = auth.clone();
     thread::spawn(move || {
         let mut guest = WapcHost::new(
             move |_id, bd, ns, op, payload| {
-                wapc_host_callback(hk.clone(), c.clone(), bus.clone(), bd, ns, op, payload)
+                wapc_host_callback(
+                    hk.clone(),
+                    c.clone(),
+                    bus.clone(),
+                    bd,
+                    ns,
+                    op,
+                    payload,
+                    authorizer.clone(),
+                )
             },
             &buf,
             wasi,

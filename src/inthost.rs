@@ -22,7 +22,7 @@ use ring::digest::{Context, Digest, SHA256};
 use crate::bus;
 use crate::bus::MessageBus;
 use crate::BindingsList;
-use crate::{authz, errors, Actor, NativeCapability};
+use crate::{authz, errors, Actor, Authorizer, NativeCapability};
 use errors::ErrorKind;
 use std::{
     collections::HashMap,
@@ -368,6 +368,7 @@ pub(crate) fn wapc_host_callback(
     namespace: &str,
     operation: &str,
     payload: &[u8],
+    authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
     trace!(
         "Guest {} invoking {}:{}",
@@ -386,13 +387,40 @@ pub(crate) fn wapc_host_callback(
         payload,
     );
 
-    if !authz::can_invoke(&claims, capability_id) {
+    if !authz::can_invoke(&claims, capability_id, operation) {
         return Err(Box::new(errors::new(errors::ErrorKind::Authorization(
             format!(
-                "Actor {} attempted to call {} on {},{} - PERMISSION DENIED.",
-                claims.subject, operation, capability_id, binding
+                "{} {} attempted to call {} on {},{} - PERMISSION DENIED.",
+                if claims.metadata.unwrap().provider {
+                    "Provider"
+                } else {
+                    "Actor"
+                },
+                claims.subject,
+                operation,
+                capability_id,
+                binding
             ),
         ))));
+    } else {
+        if !authorizer
+            .read()
+            .unwrap()
+            .can_invoke(&claims, &inv.target, operation)
+        {
+            return Err(Box::new(errors::new(errors::ErrorKind::Authorization(
+                format!(
+                    "{} {} attempted to call {:?} - Authorizer denied access",
+                    if claims.metadata.unwrap().provider {
+                        "Provider"
+                    } else {
+                        "Actor"
+                    },
+                    claims.subject,
+                    &inv.target
+                ),
+            ))));
+        }
     }
     // Make a request on either `wasmbus.Mxxxxx` for an actor or `wasmbus.{capid}.{binding}.{calling-actor}` for
     // a bound capability provider
