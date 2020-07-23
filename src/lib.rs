@@ -327,9 +327,11 @@ impl WasccHost {
     }
 
     /// Sets the authorizer to be used by the waSCC host for supplemental authorization checks
-    /// *after* the initial claims check is performed. The authorizer can add further restrictions
+    /// *after* the base claims check is performed. The authorizer can add further restrictions
     /// to actors consuming capabilities, and can determine whether one actor is allowed to
-    /// invoke another.
+    /// invoke another (including itself, which can occur during manual configuration by a host). Make
+    /// sure that you call this function immediately after creating a host to avoid allowing bindings
+    /// to be created prior to setting up your custom authorizer
     pub fn set_authorizer(&self, auth: impl Authorizer + 'static) -> Result<()> {
         let mut lock = self.authorizer.write().unwrap();
         *lock = Box::new(auth);
