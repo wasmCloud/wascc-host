@@ -3,6 +3,7 @@ mod common;
 
 use reqwest;
 use std::error::Error;
+use wascc_host::WasccHost;
 
 #[test]
 fn stock_host() -> Result<(), Box<dyn Error>> {
@@ -35,7 +36,7 @@ fn stock_host() -> Result<(), Box<dyn Error>> {
 fn kv_host() -> Result<(), Box<dyn Error>> {
     use redis::Commands;
 
-    let host = common::gen_kvcounter_host(8083)?;
+    let host = common::gen_kvcounter_host(8083, WasccHost::new())?;
     std::thread::sleep(::std::time::Duration::from_millis(100));
     let key = uuid::Uuid::new_v4().to_string();
     let rkey = format!(":{}", key); // the kv wasm logic does a replace on '/' with ':'

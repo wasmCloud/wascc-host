@@ -155,6 +155,14 @@ pub struct WasccHost {
 impl WasccHost {
     /// Creates a new waSCC runtime host
     pub fn new() -> Self {
+        Self::with_authorizer(authz::DefaultAuthorizer::new())
+    }
+
+    /// Creates a waSCC host with the given authorizer to be used for supplemental authorization checks
+    /// *after* the base claims check is performed. The authorizer can add further restrictions
+    /// to actors consuming capabilities, and can determine whether one actor is allowed to
+    /// invoke another (including itself, which can occur during manual configuration by a host).
+    pub fn with_authorizer(authz: impl Authorizer + 'static) -> Self {
         let key = KeyPair::new_server();
         let claims = Arc::new(RwLock::new(HashMap::new()));
         let caps = Arc::new(RwLock::new(HashMap::new()));
@@ -180,7 +188,7 @@ impl WasccHost {
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
             key: key,
-            authorizer: Arc::new(RwLock::new(Box::new(authz::DefaultAuthorizer::new()))),
+            authorizer: Arc::new(RwLock::new(Box::new(authz))),
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
@@ -192,7 +200,7 @@ impl WasccHost {
             middlewares: Arc::new(RwLock::new(vec![])),
             caps,
             key: key,
-            authorizer: Arc::new(RwLock::new(Box::new(authz::DefaultAuthorizer::new()))),
+            authorizer: Arc::new(RwLock::new(Box::new(authz))),
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
         host.ensure_extras().unwrap();
@@ -323,19 +331,6 @@ impl WasccHost {
             self.authorizer.clone(),
         )?;
         wg.wait();
-        Ok(())
-    }
-
-    /// Sets the authorizer to be used by the waSCC host for supplemental authorization checks
-    /// *after* the base claims check is performed. The authorizer can add further restrictions
-    /// to actors consuming capabilities, and can determine whether one actor is allowed to
-    /// invoke another (including itself, which can occur during manual configuration by a host). Make
-    /// sure that you call this function immediately after creating a host to avoid allowing bindings
-    /// to be created prior to setting up your custom authorizer
-    pub fn set_authorizer(&self, auth: impl Authorizer + 'static) -> Result<()> {
-        let mut lock = self.authorizer.write().unwrap();
-        *lock = Box::new(auth);
-
         Ok(())
     }
 

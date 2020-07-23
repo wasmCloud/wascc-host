@@ -35,8 +35,7 @@ pub fn gen_stock_host() -> Result<WasccHost, Box<dyn Error>> {
     Ok(host)
 }
 
-pub fn gen_kvcounter_host(port: u16) -> Result<WasccHost, Box<dyn Error>> {
-    let host = WasccHost::new();
+pub fn gen_kvcounter_host(port: u16, host: WasccHost) -> Result<WasccHost, Box<dyn Error>> {
     host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
     host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
