@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2020 JUL 24
+
+This version lays the groundwork for providing more advanced and pluggable authorization functionality in the future.
+
+### Removed
+
+* The `set_auth_hook` function has been removed from the `WasccHost` struct
+
+### Added
+
+* The `with_authorizer` function has been added to `WasccHost` to allow a developer to create an instance of a waSCC host with a custom authorizer (anything that implements the new `Authorizer` trait). While waSCC host will _always_ enforce the core capability claims when validating whether an actor can communicate with a given capability provider, the new `Authorizer` allows developers to build custom code that further constrains / limits the authorization when loading actors into a host and when actors are attempting to invoke operations against other actors or capability providers.
+
 ## [0.10.0] - 2020 JUL 9
 
 This release includes several lattice-related enhancements as well as some security and stability improvements.
