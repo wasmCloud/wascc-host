@@ -28,7 +28,6 @@ fn stock_host() -> Result<(), Box<dyn Error>> {
         "{\"method\":\"GET\",\"path\":\"/\",\"query_string\":\"\",\"headers\":{\"accept\":\"*/*\",\"host\":\"localhost:8081\"},\"body\":[]}"
     );
     host.shutdown()?;
-    std::thread::sleep(::std::time::Duration::from_millis(100));
     Ok(())
 }
 
@@ -51,7 +50,6 @@ fn kv_host() -> Result<(), Box<dyn Error>> {
     assert!(resp.status().is_success());
     assert_eq!(resp.text()?, "{\"counter\":3}");
     host.shutdown()?;
-    std::thread::sleep(::std::time::Duration::from_millis(100));
 
     let _: () = con.del(&rkey)?;
     Ok(())
