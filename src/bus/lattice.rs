@@ -172,7 +172,7 @@ fn respond_with_caps(
     // RouteKey - (binding, capid)
     for (k, v) in lock.iter() {
         let hc = HostedCapability {
-            binding_name: k.0.to_string(),
+            binding_name: k.binding_name.to_string(),
             descriptor: v.clone(),
         };
         capabilities.push(hc);

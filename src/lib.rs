@@ -137,7 +137,7 @@ type BindingTuple = (String, String, String); // (from-actor, to-capid, to-bindi
 /// A routing key is a combination of a capability ID and the binding name used for
 /// that capability. Think of it as a unique or primary key for a capid+binding.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
-pub struct RouteKey {
+pub(crate) struct RouteKey {
     pub binding_name: String,
     pub capid: String,
 }
@@ -587,9 +587,16 @@ impl WasccHost {
     }
 
     /// Returns the list of capability providers registered in the host. The key is a tuple of (binding, capability ID)
-    pub fn capabilities(&self) -> HashMap<RouteKey, CapabilityDescriptor> {
+    pub fn capabilities(&self) -> HashMap<(String, String), CapabilityDescriptor> {
         let lock = self.caps.read().unwrap();
-        lock.clone()
+        let mut res = HashMap::new();
+        for (rk, descriptor) in lock.iter() {
+            res.insert(
+                (rk.binding_name.to_string(), rk.capid.to_string()),
+                descriptor.clone(),
+            );
+        }
+        res
     }
 
     /// Returns the list of actors in the host that contain all of the tags in the
@@ -617,8 +624,8 @@ impl WasccHost {
             self.remove_actor(&pk)?;
         }
         let caps = self.capabilities();
-        for rk in caps.keys() {
-            self.remove_native_capability(&rk.capid, Some(rk.binding_name.to_string()))?;
+        for (binding_name, capid) in caps.keys() {
+            self.remove_native_capability(&capid, Some(binding_name.to_string()))?;
         }
         Ok(())
     }

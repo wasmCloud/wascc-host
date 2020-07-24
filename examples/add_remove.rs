@@ -43,8 +43,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!(" - {}", id);
     }
     println!("Capabilities (before removal)");
-    for (rk, _descriptor) in host.capabilities() {
-        println!("- {},{}", rk.binding_name, rk.capid);
+    for ((binding_name, capid), _descriptor) in host.capabilities() {
+        println!("- {},{}", binding_name, capid);
     }
 
     // Need to wait until the HTTP server finishes starting before we
