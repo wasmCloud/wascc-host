@@ -41,14 +41,14 @@
 //!        "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
 //!        "wascc:http_server",
 //!        None,
-//!        generate_port_config(8082),
+//!        generate_port_config(8085),
 //!    )?;
 //!
 //!    host.bind_actor(
 //!        "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
 //!        "wascc:http_server",
 //!        None,
-//!        generate_port_config(8081),
+//!        generate_port_config(8084),
 //!    )?;
 //!
 //!    assert_eq!(2, host.actors().len());
