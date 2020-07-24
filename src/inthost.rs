@@ -22,7 +22,7 @@ use ring::digest::{Context, Digest, SHA256};
 use crate::bus;
 use crate::bus::MessageBus;
 use crate::BindingsList;
-use crate::{authz, errors, Actor, Authorizer, NativeCapability};
+use crate::{authz, errors, Actor, Authorizer, NativeCapability, RouteKey};
 use errors::ErrorKind;
 use std::{
     collections::HashMap,
@@ -92,13 +92,11 @@ pub(crate) fn get_descriptor(host: &mut WapcHost) -> Result<CapabilityDescriptor
 }
 
 pub(crate) fn remove_cap(
-    caps: Arc<RwLock<HashMap<crate::RouteKey, CapabilityDescriptor>>>,
+    caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
     capid: &str,
     binding: &str,
 ) {
-    caps.write()
-        .unwrap()
-        .remove(&(binding.to_string(), capid.to_string()));
+    caps.write().unwrap().remove(&RouteKey::new(binding, capid));
 }
 
 /// Puts a "live update" message into the dispatch queue, which will be handled

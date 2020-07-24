@@ -44,7 +44,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         generate_port_config(8081),
     )?;
 
-    for ((_binding, _id), descriptor) in host.capabilities() {
+    for (_rk, descriptor) in host.capabilities() {
         println!("  **  Capability providers in Host:\n");
         println!(
             "\t'{}' v{} ({}) for {}",

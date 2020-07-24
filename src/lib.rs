@@ -133,7 +133,23 @@ use wascc_codec::{
 //type BindingsList = Vec<(String, String, String)>;
 type BindingsList = HashMap<BindingTuple, CapabilityConfiguration>;
 type BindingTuple = (String, String, String); // (from-actor, to-capid, to-binding-name)
-pub(crate) type RouteKey = (String, String); // (binding, id)
+
+/// A routing key is a combination of a capability ID and the binding name used for
+/// that capability. Think of it as a unique or primary key for a capid+binding.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
+pub struct RouteKey {
+    pub binding_name: String,
+    pub capid: String,
+}
+
+impl RouteKey {
+    pub fn new(binding_name: &str, capid: &str) -> RouteKey {
+        RouteKey {
+            binding_name: binding_name.to_string(),
+            capid: capid.to_string(),
+        }
+    }
+}
 
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
@@ -364,17 +380,14 @@ impl WasccHost {
             .caps
             .read()
             .unwrap()
-            .contains_key(&(capability.binding_name.to_string(), capability.id()))
+            .contains_key(&RouteKey::new(&capability.binding_name, &capability.id()))
         {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name                
             ))));
         }
         self.caps.write().unwrap().insert(
-            (
-                capability.binding_name.to_string(),
-                capability.descriptor.id.to_string(),
-            ),
+            RouteKey::new(&capability.binding_name, &capability.descriptor.id),
             capability.descriptor().clone(),
         );
         let wg = crossbeam_utils::sync::WaitGroup::new();
@@ -574,7 +587,7 @@ impl WasccHost {
     }
 
     /// Returns the list of capability providers registered in the host. The key is a tuple of (binding, capability ID)
-    pub fn capabilities(&self) -> HashMap<(String, String), CapabilityDescriptor> {
+    pub fn capabilities(&self) -> HashMap<RouteKey, CapabilityDescriptor> {
         let lock = self.caps.read().unwrap();
         lock.clone()
     }
@@ -604,13 +617,9 @@ impl WasccHost {
             self.remove_actor(&pk)?;
         }
         let caps = self.capabilities();
-        for (binding, capid) in caps.keys() {
-            self.remove_native_capability(&capid, Some(binding.to_string()))?;
+        for rk in caps.keys() {
+            self.remove_native_capability(&rk.capid, Some(rk.binding_name.to_string()))?;
         }
         Ok(())
     }
-}
-
-pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
-    (binding.to_string(), id.to_string())
 }

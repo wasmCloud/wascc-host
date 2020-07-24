@@ -17,7 +17,7 @@ use crate::dispatch::WasccNativeDispatcher;
 use crate::errors::{self, ErrorKind};
 use crate::inthost::Invocation;
 use crate::inthost::{InvocationResponse, WasccEntity};
-use crate::{route_key, Result, RouteKey};
+use crate::{Result, RouteKey};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -32,7 +32,7 @@ impl PluginManager {
         capid: &str,
         dispatcher: WasccNativeDispatcher,
     ) -> Result<()> {
-        let key = route_key(binding, capid);
+        let key = RouteKey::new(binding, capid);
         match self.plugins.get(&key) {
             Some(p) => match p.plugin.configure_dispatch(Box::new(dispatcher)) {
                 Ok(_) => Ok(()),
@@ -48,7 +48,7 @@ impl PluginManager {
 
     pub fn call(&self, inv: &Invocation) -> Result<InvocationResponse> {
         if let WasccEntity::Capability { capid, binding } = &inv.target {
-            let route_key = route_key(&binding, &capid);
+            let route_key = RouteKey::new(&binding, &capid);
             let actor = if let WasccEntity::Actor(s) = &inv.origin {
                 s.to_string()
             } else {
@@ -74,7 +74,7 @@ impl PluginManager {
     }
 
     pub fn add_plugin(&mut self, plugin: NativeCapability) -> Result<()> {
-        let key = route_key(&plugin.binding_name, &plugin.id());
+        let key = RouteKey::new(&plugin.binding_name, &plugin.id());
         if self.plugins.contains_key(&key) {
             Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Duplicate capability ID attempted to register provider: ({},{})",
@@ -88,7 +88,7 @@ impl PluginManager {
     }
 
     pub fn remove_plugin(&mut self, binding: &str, capid: &str) -> Result<()> {
-        let key = route_key(&binding, &capid);
+        let key = RouteKey::new(&binding, &capid);
         if let Some(plugin) = self.plugins.remove(&key) {
             drop(plugin);
         }
