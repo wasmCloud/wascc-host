@@ -29,8 +29,7 @@ hyper = { version = "0.13", optional = true }
 tokio = { version = "0.2", features = ["macros"], optional = true }
 wapc = "0.8.1"
 wascc-codec = "0.7.2"
-#wascap = "0.4.7"
-wascap = { path = "../wascap" }
+wascap = "0.5.0"
 log = "0.4.11"
 rand = "0.7.3"
 env_logger = "0.7.1"
