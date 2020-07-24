@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.10.1"
+version = "0.11.0"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -21,7 +21,7 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 libloading = "0.6.2"
-crossbeam-channel = "0.4.2"
+crossbeam-channel = "0.4.3"
 crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
 prometheus = { version = "0.9", features = ["push"], optional = true }
@@ -29,7 +29,7 @@ hyper = { version = "0.13", optional = true }
 tokio = { version = "0.2", features = ["macros"], optional = true }
 wapc = "0.8.1"
 wascc-codec = "0.7.2"
-wascap = "0.4.7"
+wascap = "0.5.0"
 log = "0.4.11"
 rand = "0.7.3"
 env_logger = "0.7.1"
@@ -39,17 +39,18 @@ data-encoding = "2.2.1"
 # Opt-in dependencies chosen by feature flags
 uuid = { version = "0.8", features = ["serde", "v4"] }
 gantryclient = { version = "0.0.7", optional = true }
-nats = { version = "0.7.0", optional = true }
+nats = { version = "0.7.1", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.13", optional = true }
 serde_json = { version = "1.0", optional = true }
-envmnt = { version = "0.8.3", optional = true }
+envmnt = { version = "0.8.4", optional = true }
 structopt = { version = "0.3.15", optional = true }
-latticeclient = { version = "0.0.1" , optional = true}
+latticeclient = { version = "0.0.2" , optional = true}
 
 [dev-dependencies]
 reqwest = { version = "0.10", features = ["blocking"] }
 mockito = "0.26"
+redis = "0.16.0"
 
 [features]
 default = []

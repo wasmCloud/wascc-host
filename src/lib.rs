@@ -41,14 +41,14 @@
 //!        "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
 //!        "wascc:http_server",
 //!        None,
-//!        generate_port_config(8082),
+//!        generate_port_config(8085),
 //!    )?;
 //!
 //!    host.bind_actor(
 //!        "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
 //!        "wascc:http_server",
 //!        None,
-//!        generate_port_config(8081),
+//!        generate_port_config(8084),
 //!    )?;
 //!
 //!    assert_eq!(2, host.actors().len());
@@ -109,12 +109,12 @@ pub use manifest::{BindingEntry, HostManifest};
 #[cfg(feature = "prometheus_middleware")]
 pub use middleware::prometheus;
 
+pub use authz::Authorizer;
 pub use middleware::Middleware;
 pub use wapc::{prelude::WasiParams, WapcHost};
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
-use authz::AuthHook;
 use bus::MessageBus;
 use crossbeam::Sender;
 use plugins::PluginManager;
@@ -122,16 +122,34 @@ use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-use wascap::jwt::{Claims, Token};
+use wascap::jwt::Claims;
 use wascap::prelude::KeyPair;
 use wascc_codec::{
-    capabilities::CapabilityDescriptor, core::CapabilityConfiguration, SYSTEM_ACTOR,
+    capabilities::CapabilityDescriptor,
+    core::{CapabilityConfiguration, OP_BIND_ACTOR},
+    SYSTEM_ACTOR,
 };
 
 //type BindingsList = Vec<(String, String, String)>;
 type BindingsList = HashMap<BindingTuple, CapabilityConfiguration>;
 type BindingTuple = (String, String, String); // (from-actor, to-capid, to-binding-name)
-pub(crate) type RouteKey = (String, String); // (binding, id)
+
+/// A routing key is a combination of a capability ID and the binding name used for
+/// that capability. Think of it as a unique or primary key for a capid+binding.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone)]
+pub(crate) struct RouteKey {
+    pub binding_name: String,
+    pub capid: String,
+}
+
+impl RouteKey {
+    pub fn new(binding_name: &str, capid: &str) -> RouteKey {
+        RouteKey {
+            binding_name: binding_name.to_string(),
+            capid: capid.to_string(),
+        }
+    }
+}
 
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
@@ -139,7 +157,6 @@ pub struct WasccHost {
     bus: Arc<MessageBus>,
     claims: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>,
     plugins: Arc<RwLock<PluginManager>>,
-    auth_hook: Arc<RwLock<Option<Box<AuthHook>>>>,
     bindings: Arc<RwLock<BindingsList>>,
     caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
@@ -148,11 +165,20 @@ pub struct WasccHost {
     #[cfg(feature = "gantry")]
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
     key: KeyPair,
+    authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
 }
 
 impl WasccHost {
     /// Creates a new waSCC runtime host
     pub fn new() -> Self {
+        Self::with_authorizer(authz::DefaultAuthorizer::new())
+    }
+
+    /// Creates a waSCC host with the given authorizer to be used for supplemental authorization checks
+    /// *after* the base claims check is performed. The authorizer can add further restrictions
+    /// to actors consuming capabilities, and can determine whether one actor is allowed to
+    /// invoke another (including itself, which can occur during manual configuration by a host).
+    pub fn with_authorizer(authz: impl Authorizer + 'static) -> Self {
         let key = KeyPair::new_server();
         let claims = Arc::new(RwLock::new(HashMap::new()));
         let caps = Arc::new(RwLock::new(HashMap::new()));
@@ -173,12 +199,12 @@ impl WasccHost {
             bus: Arc::new(bus),
             claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
-            auth_hook: Arc::new(RwLock::new(None)),
             bindings,
             caps,
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
             key: key,
+            authorizer: Arc::new(RwLock::new(Box::new(authz))),
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
@@ -186,11 +212,11 @@ impl WasccHost {
             bus: Arc::new(bus),
             claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
-            auth_hook: Arc::new(RwLock::new(None)),
             bindings,
             middlewares: Arc::new(RwLock::new(vec![])),
             caps,
             key: key,
+            authorizer: Arc::new(RwLock::new(Box::new(authz))),
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
         host.ensure_extras().unwrap();
@@ -239,6 +265,7 @@ impl WasccHost {
             self.claims.clone(),
             self.terminators.clone(),
             self.key.clone(),
+            self.authorizer.clone(),
         )?;
         wg.wait();
         if actor.capabilities().contains(&extras::CAPABILITY_ID.into()) {
@@ -317,6 +344,7 @@ impl WasccHost {
             self.claims.clone(),
             self.terminators.clone(),
             self.key.clone(),
+            self.authorizer.clone(),
         )?;
         wg.wait();
         Ok(())
@@ -344,16 +372,6 @@ impl WasccHost {
         self.middlewares.write().unwrap().push(Box::new(mid));
     }
 
-    /// Setting a custom authorization hook allows your code to make additional decisions
-    /// about whether or not a given actor is allowed to run within the host. The authorization
-    /// hook takes a `Token` (JSON Web Token) as input and returns a boolean indicating the validity of the module.
-    pub fn set_auth_hook<F>(&self, hook: F)
-    where
-        F: Fn(&Token<wascap::jwt::Actor>) -> bool + Sync + Send + 'static,
-    {
-        *self.auth_hook.write().unwrap() = Some(Box::new(hook));
-    }
-
     /// Adds a native capability provider plugin to the waSCC runtime. Note that because these capabilities are native,
     /// cross-platform support is not always guaranteed.
     pub fn add_native_capability(&self, capability: NativeCapability) -> Result<()> {
@@ -362,17 +380,14 @@ impl WasccHost {
             .caps
             .read()
             .unwrap()
-            .contains_key(&(capability.binding_name.to_string(), capability.id()))
+            .contains_key(&RouteKey::new(&capability.binding_name, &capability.id()))
         {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
                 "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name                
             ))));
         }
         self.caps.write().unwrap().insert(
-            (
-                capability.binding_name.to_string(),
-                capability.descriptor.id.to_string(),
-            ),
+            RouteKey::new(&capability.binding_name, &capability.descriptor.id),
             capability.descriptor().clone(),
         );
         let wg = crossbeam_utils::sync::WaitGroup::new();
@@ -425,13 +440,28 @@ impl WasccHost {
             )));
         }
         let c = claims.unwrap().clone();
-        if !authz::can_invoke(&c, capid) {
+        let binding = binding_name.unwrap_or("default".to_string());
+        if !authz::can_invoke(&c, capid, OP_BIND_ACTOR) {
             return Err(errors::new(errors::ErrorKind::Authorization(format!(
                 "Unauthorized binding: actor {} is not authorized to use capability {}.",
                 actor, capid
             ))));
+        } else {
+            if !self.authorizer.read().unwrap().can_invoke(
+                &c,
+                &WasccEntity::Capability {
+                    capid: capid.to_string(),
+                    binding: binding.to_string(),
+                },
+                OP_BIND_ACTOR,
+            ) {
+                return Err(errors::new(errors::ErrorKind::Authorization(format!(
+                    "Unauthorized binding: actor {} is not authorized to use capability {}.",
+                    actor, capid
+                ))));
+            }
         }
-        let binding = binding_name.unwrap_or("default".to_string());
+
         info!(
             "Attempting to bind actor {} to {},{}",
             actor, &binding, capid
@@ -556,12 +586,21 @@ impl WasccHost {
         authz::get_all_claims(self.claims.clone())
     }
 
-    /// Returns the list of capability providers registered in the host
+    /// Returns the list of capability providers registered in the host. The key is a tuple of (binding, capability ID)
     pub fn capabilities(&self) -> HashMap<(String, String), CapabilityDescriptor> {
         let lock = self.caps.read().unwrap();
-        lock.clone()
+        let mut res = HashMap::new();
+        for (rk, descriptor) in lock.iter() {
+            res.insert(
+                (rk.binding_name.to_string(), rk.capid.to_string()),
+                descriptor.clone(),
+            );
+        }
+        res
     }
 
+    /// Returns the list of actors in the host that contain all of the tags in the
+    /// supplied parameter
     pub fn actors_by_tag(&self, tags: &[&str]) -> Vec<String> {
         let mut actors = vec![];
 
@@ -575,8 +614,19 @@ impl WasccHost {
 
         actors
     }
-}
 
-pub(crate) fn route_key(binding: &str, id: &str) -> RouteKey {
-    (binding.to_string(), id.to_string())
+    /// Attempts to perform a graceful shutdown of the host by removing all actors in
+    /// the host and then removing all capability providers. This function is not guaranteed to
+    /// block and wait for the shutdown to finish
+    pub fn shutdown(&self) -> Result<()> {
+        let actors = self.actors();
+        for (pk, _claims) in actors {
+            self.remove_actor(&pk)?;
+        }
+        let caps = self.capabilities();
+        for (binding_name, capid) in caps.keys() {
+            self.remove_native_capability(&capid, Some(binding_name.to_string()))?;
+        }
+        Ok(())
+    }
 }
