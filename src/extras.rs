@@ -54,7 +54,7 @@ impl ExtrasCapabilityProvider {
         &self,
         _actor: &str,
         _msg: GeneratorRequest,
-    ) -> Result<Vec<u8>, Box<dyn Error>> {
+    ) -> Result<Vec<u8>, Box<dyn Error + Sync + Send>> {
         let uuid = Uuid::new_v4();
         let result = GeneratorResult {
             guid: Some(format!("{}", uuid)),
@@ -69,7 +69,7 @@ impl ExtrasCapabilityProvider {
         &self,
         _actor: &str,
         msg: GeneratorRequest,
-    ) -> Result<Vec<u8>, Box<dyn Error>> {
+    ) -> Result<Vec<u8>, Box<dyn Error + Sync + Send>> {
         use rand::prelude::*;
         let mut rng = rand::thread_rng();
         let result = if let GeneratorRequest {
@@ -96,7 +96,7 @@ impl ExtrasCapabilityProvider {
         &self,
         actor: &str,
         _msg: GeneratorRequest,
-    ) -> Result<Vec<u8>, Box<dyn Error>> {
+    ) -> Result<Vec<u8>, Box<dyn Error + Sync + Send>> {
         let mut lock = self.sequences.write().unwrap();
         let seq = lock
             .entry(actor.to_string())
@@ -110,7 +110,7 @@ impl ExtrasCapabilityProvider {
         Ok(serialize(&result)?)
     }
 
-    fn get_descriptor(&self) -> Result<Vec<u8>, Box<dyn Error>> {
+    fn get_descriptor(&self) -> Result<Vec<u8>, Box<dyn Error + Sync + Send>> {
         Ok(serialize(
             CapabilityDescriptor::builder()
                 .id(CAPABILITY_ID)
@@ -144,7 +144,7 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
     fn configure_dispatch(
         &self,
         dispatcher: Box<dyn wascc_codec::capabilities::Dispatcher>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         trace!("Dispatcher received.");
         let mut lock = self.dispatcher.write().unwrap();
         *lock = dispatcher;
@@ -157,7 +157,7 @@ impl CapabilityProvider for ExtrasCapabilityProvider {
         actor: &str,
         op: &str,
         msg: &[u8],
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Sync + Send>> {
         trace!("Received host call from {}, operation - {}", actor, op);
 
         match op {

@@ -19,7 +19,7 @@
 
 use wascc_host::{HostManifest, WasccHost};
 
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let host = WasccHost::new();
     host.apply_manifest(HostManifest::from_yaml(

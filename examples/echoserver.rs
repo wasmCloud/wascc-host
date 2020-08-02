@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use wascc_host::{Actor, NativeCapability, WasccHost};
 
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let host = WasccHost::new();
     host.add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;

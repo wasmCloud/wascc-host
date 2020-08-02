@@ -13,12 +13,12 @@
 // limitations under the License.
 
 #[cfg(feature = "prometheus_middleware")]
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     prometheus_example::run_example()
 }
 
 #[cfg(not(feature = "prometheus_middleware"))]
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Feature 'prometheus_middleware' needed to run this example");
     Ok(())
 }
@@ -30,7 +30,7 @@ mod prometheus_example {
     use wascc_host::middleware::prometheus::{PrometheusConfig, PrometheusMiddleware};
     use wascc_host::{Actor, NativeCapability, WasccHost};
 
-    pub fn run_example() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    pub fn run_example() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         env_logger::init();
         let host = WasccHost::new();
         host.add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;

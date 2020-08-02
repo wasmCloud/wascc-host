@@ -41,7 +41,7 @@ struct CliCommand {
 }
 
 #[cfg(feature = "manifest")]
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Cli::from_args();
     let cmd = args.command;
     let _ = env_logger::builder().format_module_path(false).try_init();
@@ -60,7 +60,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(not(feature = "manifest"))]
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!(
         "The general-purpose waSCC host application needs to be built with the `manifest` feature."
     );

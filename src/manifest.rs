@@ -45,7 +45,7 @@ impl HostManifest {
     pub fn from_yaml(
         path: impl AsRef<Path>,
         expand_env: bool,
-    ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
+    ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error + Send + Sync>> {
         let mut contents = String::new();
         let mut file = File::open(path)?;
         file.read_to_string(&mut contents)?;
@@ -62,7 +62,7 @@ impl HostManifest {
     pub fn from_json(
         path: impl AsRef<Path>,
         expand_env: bool,
-    ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error>> {
+    ) -> ::std::result::Result<HostManifest, Box<dyn std::error::Error + Send + Sync>> {
         let mut contents = String::new();
         let mut file = File::open(path)?;
         file.read_to_string(&mut contents)?;
