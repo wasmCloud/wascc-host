@@ -367,7 +367,7 @@ pub(crate) fn wapc_host_callback(
     operation: &str,
     payload: &[u8],
     authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
-) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
+) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     trace!(
         "Guest {} invoking {}:{}",
         claims.subject,

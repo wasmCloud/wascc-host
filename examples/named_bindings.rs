@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use wascc_host::{Actor, NativeCapability, WasccHost};
 
 const ACTOR_SUBJECT: &str = "MCYWHMJW5VW5U7ZRDQV7JU45GHSR2SA6OZJ2MPHQCFALR2CGFA2NAMZM";
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let host = WasccHost::new();
     host.add_actor(Actor::from_file("./examples/.assets/multibinding.wasm")?)?;

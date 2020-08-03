@@ -27,7 +27,7 @@ pub fn new(kind: ErrorKind) -> Error {
 #[derive(Debug)]
 pub enum ErrorKind {
     Wapc(wapc::errors::Error),
-    HostCallFailure(Box<dyn StdError>),
+    HostCallFailure(Box<dyn StdError + Send + Sync>),
     Wascap(wascap::Error),
     Authorization(String),
     IO(std::io::Error),
@@ -122,8 +122,15 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<Box<dyn StdError>> for Error {
-    fn from(source: Box<dyn StdError>) -> Error {
+impl From<Box<dyn StdError + Send + Sync>> for Error {
+    fn from(source: Box<dyn StdError + Send + Sync>) -> Error {
         Error(Box::new(ErrorKind::HostCallFailure(source)))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[allow(dead_code)]
+    fn assert_sync_send<T: Send + Sync>() {}
+    const _: fn() = || assert_sync_send::<super::Error>();
 }

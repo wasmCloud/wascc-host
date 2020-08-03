@@ -21,7 +21,7 @@ extern crate log;
 
 type Result<T> = std::result::Result<T, wascc_host::errors::Error>;
 
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let host = WasccHost::new();
     host.add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;

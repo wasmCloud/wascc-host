@@ -43,7 +43,12 @@ impl WasccNativeDispatcher {
 
 impl Dispatcher for WasccNativeDispatcher {
     /// Called by a capability provider to invoke a function on an actor
-    fn dispatch(&self, actor: &str, op: &str, msg: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    fn dispatch(
+        &self,
+        actor: &str,
+        op: &str,
+        msg: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn Error + Sync + Send>> {
         trace!(
             "Dispatching operation '{}' ({} bytes) to actor",
             op,
