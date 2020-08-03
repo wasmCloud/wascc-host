@@ -20,14 +20,15 @@ fn stock_host() -> Result<(), Box<dyn Error>> {
             .contains(&"wascc:http_server".to_string()));
     }
 
-    std::thread::sleep(::std::time::Duration::from_millis(100));
+    std::thread::sleep(::std::time::Duration::from_millis(500));
 
-    let resp = reqwest::blocking::get("http://localhost:8081")?;
+    let resp = reqwest::blocking::get("http://localhost:8087")?;
     assert!(resp.status().is_success());
     assert_eq!(resp.text()?,
-        "{\"method\":\"GET\",\"path\":\"/\",\"query_string\":\"\",\"headers\":{\"accept\":\"*/*\",\"host\":\"localhost:8081\"},\"body\":[]}"
+        "{\"method\":\"GET\",\"path\":\"/\",\"query_string\":\"\",\"headers\":{\"accept\":\"*/*\",\"host\":\"localhost:8087\"},\"body\":[]}"
     );
     host.shutdown()?;
+    std::thread::sleep(::std::time::Duration::from_millis(100));
     Ok(())
 }
 

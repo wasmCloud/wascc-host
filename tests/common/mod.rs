@@ -15,21 +15,21 @@ pub fn gen_stock_host() -> Result<WasccHost, Box<dyn Error>> {
     host.add_actor(get_hello2_actor()?)?;
     host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",
-        None,
+        Some("stockhost".to_string()),
     )?)?;
 
     host.bind_actor(
         "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
         "wascc:http_server",
-        None,
-        generate_port_config(8082),
+        Some("stockhost".to_string()),
+        generate_port_config(8087),
     )?;
 
     host.bind_actor(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
-        None,
-        generate_port_config(8081),
+        Some("stockhost".to_string()),
+        generate_port_config(8088),
     )?;
 
     Ok(host)
