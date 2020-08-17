@@ -14,7 +14,7 @@ categories = ["wasm", "api-bindings","command-line-utilities"]
 exclude = ["examples/.assets"]
 
 [package.metadata.docs.rs]
-features = [ "gantry", "manifest" ]
+features = [ "gantry", "manifest", "lattice" ]
 
 [badges]
 maintenance = { status = "actively-developed" }
@@ -34,7 +34,7 @@ log = "0.4.11"
 rand = "0.7.3"
 env_logger = "0.7.1"
 ring = "0.16.15"
-data-encoding = "2.2.1"
+data-encoding = "2.3.0"
 
 # Opt-in dependencies chosen by feature flags
 uuid = { version = "0.8", features = ["serde", "v4"] }
@@ -44,13 +44,14 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.13", optional = true }
 serde_json = { version = "1.0", optional = true }
 envmnt = { version = "0.8.4", optional = true }
-structopt = { version = "0.3.15", optional = true }
-latticeclient = { version = "0.0.3" , optional = true}
+structopt = { version = "0.3.16", optional = true }
+latticeclient = { version = "0.1.0" , optional = true}
+
 
 [dev-dependencies]
 reqwest = { version = "0.10", features = ["blocking"] }
-mockito = "0.26"
-redis = "0.16.0"
+mockito = "0.27"
+redis = "0.17.0"
 
 [features]
 default = []

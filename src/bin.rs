@@ -1,17 +1,3 @@
-// Copyright 2015-2020 Capital One Services, LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use std::path::PathBuf;
 use structopt::clap::AppSettings;
 use structopt::StructOpt;
@@ -44,15 +30,17 @@ struct CliCommand {
 fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Cli::from_args();
     let cmd = args.command;
-    let _ = env_logger::builder().format_module_path(false).try_init();
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "wascc_host=info"),
+    )
+    .format_module_path(false)
+    .try_init();
+
     let host = WasccHost::new();
 
-    let manifest = HostManifest::from_yaml(cmd.manifest_path, cmd.expand_env)?;
-    info!(
-        "waSCC Host Manifest loaded, CWD: {:?}",
-        std::env::current_dir()?
-    );
+    let manifest = HostManifest::from_path(cmd.manifest_path, cmd.expand_env)?;
     host.apply_manifest(manifest)?;
+    info!("Processed and applied host manifest");
 
     std::thread::park();
 
