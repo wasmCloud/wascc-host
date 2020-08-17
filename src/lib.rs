@@ -117,7 +117,7 @@ pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use bus::MessageBus;
 use crossbeam::Sender;
-#[cfg(feature = "lattice")]
+#[cfg(any(feature = "lattice", feature = "manifest"))]
 use inthost::RESTRICTED_LABELS;
 use plugins::PluginManager;
 use std::{
