@@ -2,6 +2,8 @@
 # To see this in action, `cargo run --example kvcounter_manifest --all-features` from the
 # wascc-host root directory
 ---
+labels:
+    sample: "Key-Value Counter"
 actors:
     - ./examples/.assets/kvcounter.wasm
 capabilities:

@@ -1,17 +1,3 @@
-// Copyright 2015-2020 Capital One Services, LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 // Implementations of support functions for the `WasccHost` struct
 
 use super::WasccHost;
@@ -37,6 +23,12 @@ use wascc_codec::{
     core::{CapabilityConfiguration, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
     deserialize, serialize, SYSTEM_ACTOR,
 };
+
+pub(crate) const CORELABEL_ARCH: &str = "hostcore.arch";
+pub(crate) const CORELABEL_OS: &str = "hostcore.os";
+pub(crate) const CORELABEL_OSFAMILY: &str = "hostcore.osfamily";
+#[allow(dead_code)]
+pub(crate) const RESTRICTED_LABELS: [&str; 3] = [CORELABEL_OSFAMILY, CORELABEL_ARCH, CORELABEL_OS];
 
 pub(crate) fn unsub_all_bindings(
     bindings: Arc<RwLock<BindingsList>>,
@@ -548,6 +540,21 @@ pub fn invocation_hash(target_url: &str, origin_url: &str, msg: &[u8]) -> String
     cleanbytes.write(msg).unwrap();
     let digest = sha256_digest(cleanbytes.as_slice()).unwrap();
     HEXUPPER.encode(digest.as_ref())
+}
+
+pub(crate) fn detect_core_host_labels() -> HashMap<String, String> {
+    let mut hm = HashMap::new();
+    hm.insert(
+        CORELABEL_ARCH.to_string(),
+        std::env::consts::ARCH.to_string(),
+    );
+    hm.insert(CORELABEL_OS.to_string(), std::env::consts::OS.to_string());
+    hm.insert(
+        CORELABEL_OSFAMILY.to_string(),
+        std::env::consts::FAMILY.to_string(),
+    );
+    trace!("Intrinsic host labels: {:?}", hm);
+    hm
 }
 
 #[cfg(test)]

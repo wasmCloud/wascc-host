@@ -117,6 +117,8 @@ pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use bus::MessageBus;
 use crossbeam::Sender;
+#[cfg(any(feature = "lattice", feature = "manifest"))]
+use inthost::RESTRICTED_LABELS;
 use plugins::PluginManager;
 use std::{
     collections::HashMap,
@@ -129,7 +131,6 @@ use wascc_codec::{
     core::{CapabilityConfiguration, OP_BIND_ACTOR},
     SYSTEM_ACTOR,
 };
-
 //type BindingsList = Vec<(String, String, String)>;
 type BindingsList = HashMap<BindingTuple, CapabilityConfiguration>;
 type BindingTuple = (String, String, String); // (from-actor, to-capid, to-binding-name)
@@ -166,6 +167,7 @@ pub struct WasccHost {
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
     key: KeyPair,
     authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
+    labels: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl WasccHost {
@@ -183,12 +185,14 @@ impl WasccHost {
         let claims = Arc::new(RwLock::new(HashMap::new()));
         let caps = Arc::new(RwLock::new(HashMap::new()));
         let bindings = Arc::new(RwLock::new(HashMap::new()));
+        let labels = Arc::new(RwLock::new(inthost::detect_core_host_labels()));
         #[cfg(feature = "lattice")]
         let bus = bus::new(
             key.public_key(),
             claims.clone(),
             caps.clone(),
             bindings.clone(),
+            labels.clone(),
         );
         #[cfg(not(feature = "lattice"))]
         let bus = bus::new();
@@ -205,6 +209,7 @@ impl WasccHost {
             gantry_client: Arc::new(RwLock::new(None)),
             key: key,
             authorizer: Arc::new(RwLock::new(Box::new(authz))),
+            labels,
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
@@ -217,10 +222,22 @@ impl WasccHost {
             caps,
             key: key,
             authorizer: Arc::new(RwLock::new(Box::new(authz))),
+            labels,
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
         host.ensure_extras().unwrap();
         host
+    }
+
+    /// Sets an arbitrary label on the host. Discoverable via lattice query
+    #[cfg(feature = "lattice")]
+    pub fn set_label(&self, label: &str, value: &str) {
+        if !RESTRICTED_LABELS.contains(&label) {
+            self.labels
+                .write()
+                .unwrap()
+                .insert(label.to_string(), value.to_string());
+        }
     }
 
     /// Adds an actor to the host
@@ -549,6 +566,14 @@ impl WasccHost {
     /// and actor bindings
     #[cfg(feature = "manifest")]
     pub fn apply_manifest(&self, manifest: HostManifest) -> Result<()> {
+        {
+            let mut labels = self.labels.write().unwrap();
+            for (label, label_value) in manifest.labels {
+                if !RESTRICTED_LABELS.contains(&label.as_ref()) {
+                    labels.insert(label.to_string(), label_value.to_string());
+                }
+            }
+        }
         for actor in manifest.actors {
             #[cfg(feature = "gantry")]
             self.add_actor_gantry_first(&actor)?;

@@ -1,31 +1,17 @@
-// Copyright 2015-2020 Capital One Services, LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use crate::{BindingsList, RouteKey};
 use crate::{Invocation, InvocationResponse, Result};
 use crossbeam::{Receiver, Sender};
 use nats;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use wascap::jwt::{Actor, Claims};
 use wascc_codec::{capabilities::CapabilityDescriptor, deserialize, serialize};
 
 const LATTICE_HOST_KEY: &str = "LATTICE_HOST"; // env var name
 const DEFAULT_LATTICE_HOST: &str = "127.0.0.1"; // default mode is anonymous via loopback
 const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
-const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 500;
+const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 600;
 const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
 
 const INVENTORY_SUBJECT: &str = "wasmbus.inventory.*";
@@ -44,6 +30,7 @@ impl DistributedBus {
         claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
         caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
         bindings: Arc<RwLock<BindingsList>>,
+        labels: Arc<RwLock<HashMap<String, String>>>,
     ) -> Self {
         let nc = Arc::new(get_connection());
 
@@ -54,6 +41,8 @@ impl DistributedBus {
             claims.clone(),
             bindings.clone(),
             caps.clone(),
+            SystemTime::now(),
+            labels,
         )
         .unwrap();
         DistributedBus {
@@ -102,11 +91,14 @@ fn spawn_inventory_handler(
     claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
     bindings: Arc<RwLock<BindingsList>>,
     caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
+    started: SystemTime,
+    labels: Arc<RwLock<HashMap<String, String>>>,
 ) -> Result<()> {
+    let lbs = labels.clone();
     let _ = nc.subscribe(INVENTORY_SUBJECT)?.with_handler(move |msg| {
         trace!("Handling Inventory Request");
         match msg.subject.clone().as_str() {
-            INVENTORY_HOSTS => respond_with_host(msg, host_id.to_string()),
+            INVENTORY_HOSTS => respond_with_host(msg, host_id.to_string(), started, lbs.clone()),
             INVENTORY_ACTORS => respond_with_actors(msg, host_id.to_string(), claims.clone()),
             INVENTORY_BINDINGS => respond_with_bindings(msg, host_id.to_string(), bindings.clone()),
             INVENTORY_CAPABILITIES => respond_with_caps(msg, host_id.to_string(), caps.clone()),
@@ -122,8 +114,15 @@ fn spawn_inventory_handler(
 fn respond_with_host(
     msg: nats::Message,
     host_id: String,
+    started: SystemTime,
+    labels: Arc<RwLock<HashMap<String, String>>>,
 ) -> std::result::Result<(), std::io::Error> {
-    msg.respond(serde_json::to_vec(&InventoryResponse::Host(host_id)).unwrap())
+    let hp = HostProfile {
+        id: host_id.to_string(),
+        uptime_ms: started.elapsed().unwrap_or(Duration::new(0, 0)).as_millis(),
+        labels: labels.read().unwrap().clone(),
+    };
+    msg.respond(serde_json::to_vec(&InventoryResponse::Host(hp)).unwrap())
 }
 
 fn respond_with_actors(
