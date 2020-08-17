@@ -13,9 +13,9 @@ This version corresponds to the project milestone 0.12
 
 * _Host Labels_ - You can now add arbitrary key/value pairs to a host manifest (when feature enabled) or via the `set_label` function (when `lattice` is enabled). These labels are discoverable via lattice host probe query. The host runtime will automatically add the appropriate values for the following reserved labels which cannot be overridden:
 
-    * hostcore/os
-    * hostcore/osfamily
-    * hostcore/arch
+    * hostcore.os
+    * hostcore.osfamily
+    * hostcore.arch
 
 * _Uptime_ - Uptime is now being tracked when the `lattice` feature is enabled, and will be reported in response to host probes on the control subject.
 
