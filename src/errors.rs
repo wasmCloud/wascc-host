@@ -35,6 +35,7 @@ pub enum ErrorKind {
     MiscHost(String),
     Plugin(libloading::Error),
     Middleware(String),
+    Serialization(String),
 }
 
 impl Error {
@@ -59,6 +60,7 @@ impl StdError for Error {
             ErrorKind::MiscHost(_) => "waSCC Host error",
             ErrorKind::Plugin(_) => "Plugin error",
             ErrorKind::Middleware(_) => "Middleware error",
+            ErrorKind::Serialization(_) => "Serialization failure",
         }
     }
 
@@ -73,6 +75,7 @@ impl StdError for Error {
             ErrorKind::MiscHost(_) => None,
             ErrorKind::Plugin(ref err) => Some(err),
             ErrorKind::Middleware(_) => None,
+            ErrorKind::Serialization(_) => None,
         }
     }
 }
@@ -95,6 +98,7 @@ impl fmt::Display for Error {
             ErrorKind::MiscHost(ref err) => write!(f, "waSCC Host Error: {}", err),
             ErrorKind::Plugin(ref err) => write!(f, "Plugin error: {}", err),
             ErrorKind::Middleware(ref err) => write!(f, "Middleware error: {}", err),
+            ErrorKind::Serialization(ref err) => write!(f, "Serialization failure: {}", err),
         }
     }
 }

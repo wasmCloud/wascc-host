@@ -44,7 +44,7 @@ jobs:
       - name: Run tests (gantry only)
         run: cargo test --verbose --features "gantry"      
       - name: Run tests (lattice mode)
-        run: cargo test --verbose --features "manifest lattice"
+        run: cargo test --features "lattice manifest" --test integration -- --test-threads=1
         env:
           LATTICE_HOST: 0.0.0.0
           LATTICE_RPC_TIMEOUT_MILLIS: 100

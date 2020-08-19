@@ -1,3 +1,6 @@
+#[cfg(feature = "lattice")]
+use crossbeam::Sender;
+
 pub const URL_SCHEME: &str = "wasmbus";
 
 #[cfg(feature = "lattice")]
@@ -34,8 +37,9 @@ pub(crate) fn new(
     caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
     bindings: Arc<RwLock<BindingsList>>,
     labels: Arc<RwLock<HashMap<String, String>>>,
+    terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
 ) -> MessageBus {
-    lattice::DistributedBus::new(host_id, claims, caps, bindings, labels)
+    lattice::DistributedBus::new(host_id, claims, caps, bindings, labels, terminators)
 }
 
 pub(crate) fn actor_subject(actor: &str) -> String {

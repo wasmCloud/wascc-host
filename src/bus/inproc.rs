@@ -29,6 +29,10 @@ impl InprocBus {
         }
     }
 
+    pub fn disconnect(&self) {
+        // No-op
+    }
+
     pub fn subscribe(
         &self,
         subject: &str,

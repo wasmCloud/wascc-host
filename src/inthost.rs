@@ -30,6 +30,7 @@ pub(crate) const CORELABEL_OSFAMILY: &str = "hostcore.osfamily";
 #[allow(dead_code)]
 pub(crate) const RESTRICTED_LABELS: [&str; 3] = [CORELABEL_OSFAMILY, CORELABEL_ARCH, CORELABEL_OS];
 
+// Unsubscribes all of the private actor-provider comms subjects
 pub(crate) fn unsub_all_bindings(
     bindings: Arc<RwLock<BindingsList>>,
     bus: Arc<MessageBus>,
