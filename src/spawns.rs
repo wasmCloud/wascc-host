@@ -26,6 +26,8 @@ use authz::ClaimsMap;
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
+#[cfg(feature = "lattice")]
+use latticeclient::BusEvent;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -36,15 +38,13 @@ use wascc_codec::{
     core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_PERFORM_LIVE_UPDATE, OP_REMOVE_ACTOR},
     deserialize,
 };
-#[cfg(feature="lattice")]
-use latticeclient::BusEvent;
 
 /// Spawns a new background thread in which a new `WapcHost` is created for the actor
 /// module bytes. A message bus subscription is created either for the actor's RPC
 /// subject OR for the capability provider's root subject. We then select between a receive
 /// invocation on the subscription's channel or a receive invocation on the terminator channel,
 /// which will then trigger a cleanup of the actor's resources.
-pub(crate) fn spawn_actor(    
+pub(crate) fn spawn_actor(
     wg: WaitGroup,
     claims: Claims<wascap::jwt::Actor>,
     buf: Vec<u8>,
@@ -67,9 +67,12 @@ pub(crate) fn spawn_actor(
     let hostkey = hk.clone();
     let authorizer = auth.clone();
     thread::spawn(move || {
-        #[cfg(feature = "lattice")]
         if actor {
-            let _ = bus.publish_event(BusEvent::ActorStarting{ host: hostkey.public_key(), actor: claims.subject.to_string() });
+            #[cfg(feature = "lattice")]
+            let _ = bus.publish_event(BusEvent::ActorStarting {
+                host: hostkey.public_key(),
+                actor: claims.subject.to_string(),
+            });
         }
         let mut guest = WapcHost::new(
             move |_id, bd, ns, op, payload| {
@@ -102,9 +105,13 @@ pub(crate) fn spawn_actor(
             }
             let capid = d.as_ref().unwrap().id.to_string();
             let binding = binding.unwrap();
-            #[cfg(feature="lattice")]
-            let _ = b.publish_event(BusEvent::ProviderLoaded{ host: hostkey.public_key(), capid: capid.to_string(), instance_name: binding.to_string()});
-            
+            #[cfg(feature = "lattice")]
+            let _ = b.publish_event(BusEvent::ProviderLoaded {
+                host: hostkey.public_key(),
+                capid: capid.to_string(),
+                instance_name: binding.to_string(),
+            });
+
             bus::provider_subject(&capid, binding.as_ref())
         };
 
@@ -122,10 +129,13 @@ pub(crate) fn spawn_actor(
             .insert(subscribe_subject.clone(), term_s);
         let _ = b.subscribe(&subscribe_subject, inv_s, resp_r).unwrap();
         drop(wg); // Let the WasccHost wrapper function return
-        #[cfg(feature = "lattice")]
         if actor {
-            let _ = b.publish_event(BusEvent::ActorStarted{ host: hostkey.public_key(), actor: claims.subject.to_string() });
-        } 
+            #[cfg(feature = "lattice")]
+            let _ = b.publish_event(BusEvent::ActorStarted {
+                host: hostkey.public_key(),
+                actor: claims.subject.to_string(),
+            });
+        }
 
         loop {
             let mids = m.clone();
@@ -136,18 +146,18 @@ pub(crate) fn spawn_actor(
             select! {
                 recv(inv_r) -> inv => {
                     if let Ok(inv) = inv {
-                        if inv.operation == OP_PERFORM_LIVE_UPDATE && actor { // Preempt the middleware chain if the operation is a live update                            
+                        if inv.operation == OP_PERFORM_LIVE_UPDATE && actor { // Preempt the middleware chain if the operation is a live update
                             #[cfg(feature = "lattice")]
                             let _ = b.publish_event(BusEvent::ActorUpdating { actor: c.subject.to_string(), host: hostkey.public_key()});
-                            let r = live_update(&mut guest, &inv);                            
+                            let r = live_update(&mut guest, &inv);
                             #[cfg(feature = "lattice")]
                             {
                                 let succeeded = r.error.is_none();
                                 let _ = b.publish_event(BusEvent::ActorUpdateComplete {
-                                    actor: c.subject.to_string(), 
+                                    actor: c.subject.to_string(),
                                     host: hostkey.public_key(),
                                     success: succeeded});
-                            }                            
+                            }
                             resp_s.send(r).unwrap();
                             continue;
                         }
@@ -166,18 +176,18 @@ pub(crate) fn spawn_actor(
                         }
                     }
                 },
-                recv(term_r) -> _term => {                    
+                recv(term_r) -> _term => {
                     info!("Terminating {} {}", if actor { "actor" } else { "capability" }, &claims.subject);
                     let _ = b.unsubscribe(&subscribe_subject);
                     terminators.write().unwrap().remove(&subscribe_subject);
                     if !actor {
                         //#[cfg(feature = "lattice")]
                         //let _ = bus.publish_event(BusEvent::ProviderRemoved{ host: hostkey.public_key(), actor: claims.subject.to_string() });
-                        remove_cap(caps, &d.as_ref().unwrap().id, binding.unwrap().as_ref()); // for cap providers, route key is the capid                        
+                        remove_cap(caps, &d.as_ref().unwrap().id, binding.unwrap().as_ref()); // for cap providers, route key is the capid
                         unbind_all_from_cap(bindings.clone(), &d.unwrap().id, bi.unwrap().as_ref());
                     } else {
                         #[cfg(feature = "lattice")]
-                        let _ = bus.publish_event(BusEvent::ActorStopped{ host: hostkey.public_key(), actor: claims.subject.to_string() });                        
+                        let _ = bus.publish_event(BusEvent::ActorStopped{ host: hostkey.public_key(), actor: claims.subject.to_string() });
                         deconfigure_actor(hostkey.clone(),bus.clone(), bindings.clone(), &claims.subject);
                         authz::unregister_claims(claimsmap, &claims.subject);
                     }
@@ -189,7 +199,7 @@ pub(crate) fn spawn_actor(
     Ok(())
 }
 
-pub(crate) fn spawn_native_capability(    
+pub(crate) fn spawn_native_capability(
     capability: NativeCapability,
     bus: Arc<MessageBus>,
     mids: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
@@ -227,8 +237,12 @@ pub(crate) fn spawn_native_capability(
         info!("Native capability provider '({},{})' ready", binding, capid);
 
         drop(wg);
-        #[cfg(feature="lattice")]
-        let _ = b.publish_event(BusEvent::ProviderLoaded{ host: hk.public_key(), capid: capid.to_string(), instance_name: binding.to_string()});
+        #[cfg(feature = "lattice")]
+        let _ = b.publish_event(BusEvent::ProviderLoaded {
+            host: hk.public_key(),
+            capid: capid.to_string(),
+            instance_name: binding.to_string(),
+        });
 
         loop {
             select! {
