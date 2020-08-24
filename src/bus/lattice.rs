@@ -1,6 +1,7 @@
 use crate::{BindingsList, RouteKey};
 use crate::{Invocation, InvocationResponse, Result};
 use crossbeam::{Receiver, Sender};
+use latticeclient::{BusEvent, CloudEvent, BUS_EVENT_SUBJECT};
 use nats;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -14,14 +15,19 @@ const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
 const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 600;
 const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
 
+const TERM_BACKOFF_MAX_TRIES: u8 = 3;
+const TERM_BACKOFF_DELAY_MS: u64 = 50;
+
 const INVENTORY_SUBJECT: &str = "wasmbus.inventory.*";
 
 use latticeclient::*;
 
 pub(crate) struct DistributedBus {
-    nc: Arc<nats::Connection>,
+    nc: Arc<RwLock<Option<nats::Connection>>>,
     subs: Arc<RwLock<HashMap<String, nats::subscription::Handler>>>,
+    terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     req_timeout: Duration,
+    host_id: String,
 }
 
 impl DistributedBus {
@@ -31,13 +37,14 @@ impl DistributedBus {
         caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
         bindings: Arc<RwLock<BindingsList>>,
         labels: Arc<RwLock<HashMap<String, String>>>,
+        terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     ) -> Self {
-        let nc = Arc::new(get_connection());
+        let nc = Arc::new(RwLock::new(Some(get_connection())));
 
         info!("Initialized Message Bus (lattice)");
         spawn_inventory_handler(
             nc.clone(),
-            host_id,
+            host_id.to_string(),
             claims.clone(),
             bindings.clone(),
             caps.clone(),
@@ -48,7 +55,24 @@ impl DistributedBus {
         DistributedBus {
             nc,
             subs: Arc::new(RwLock::new(HashMap::new())),
+            terminators,
             req_timeout: get_timeout(),
+            host_id,
+        }
+    }
+
+    pub fn disconnect(&self) {
+        let mut backoffcount = 0_u8;
+        // Wait until everything that can be gracefully shut off has been shut off
+        while self.terminators.read().unwrap().len() > 0 && backoffcount < TERM_BACKOFF_MAX_TRIES {
+            std::thread::sleep(std::time::Duration::from_millis(TERM_BACKOFF_DELAY_MS));
+            backoffcount += 1;
+        }
+        let _ = self.publish_event(BusEvent::HostStopped(self.host_id.to_string()));
+        let mut lock = self.nc.write().unwrap();
+        let conn = lock.take();
+        if let Some(nc) = conn {
+            nc.close();
         }
     }
 
@@ -60,6 +84,10 @@ impl DistributedBus {
     ) -> Result<()> {
         let sub = self
             .nc
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
             .queue_subscribe(subject, subject)?
             .with_handler(move |msg| {
                 handle_invocation(&msg, sender.clone(), receiver.clone());
@@ -70,9 +98,11 @@ impl DistributedBus {
     }
 
     pub fn invoke(&self, subject: &str, inv: Invocation) -> Result<InvocationResponse> {
-        let resp = self
-            .nc
-            .request_timeout(&subject, &serialize(inv)?, self.req_timeout)?;
+        let resp = self.nc.read().unwrap().as_ref().unwrap().request_timeout(
+            &subject,
+            &serialize(inv)?,
+            self.req_timeout,
+        )?;
         let ir: InvocationResponse = deserialize(&resp.data)?;
         Ok(ir)
     }
@@ -83,10 +113,27 @@ impl DistributedBus {
         }
         Ok(())
     }
+
+    pub fn publish_event(&self, event: BusEvent) -> Result<()> {
+        let cloud_event = CloudEvent::from(event);
+        let payload = match serde_json::to_vec(&cloud_event) {
+            Ok(p) => p,
+            Err(e) => {
+                return Err(crate::errors::new(crate::errors::ErrorKind::Serialization(
+                    format!("{}", e),
+                )))
+            }
+        };
+        let lock = self.nc.read().unwrap();
+        if let Some(ref nc) = lock.as_ref() {
+            let _ = nc.publish(BUS_EVENT_SUBJECT, &payload);
+        }
+        Ok(())
+    }
 }
 
 fn spawn_inventory_handler(
-    nc: Arc<nats::Connection>,
+    nc: Arc<RwLock<Option<nats::Connection>>>,
     host_id: String,
     claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
     bindings: Arc<RwLock<BindingsList>>,
@@ -95,19 +142,29 @@ fn spawn_inventory_handler(
     labels: Arc<RwLock<HashMap<String, String>>>,
 ) -> Result<()> {
     let lbs = labels.clone();
-    let _ = nc.subscribe(INVENTORY_SUBJECT)?.with_handler(move |msg| {
-        trace!("Handling Inventory Request");
-        match msg.subject.clone().as_str() {
-            INVENTORY_HOSTS => respond_with_host(msg, host_id.to_string(), started, lbs.clone()),
-            INVENTORY_ACTORS => respond_with_actors(msg, host_id.to_string(), claims.clone()),
-            INVENTORY_BINDINGS => respond_with_bindings(msg, host_id.to_string(), bindings.clone()),
-            INVENTORY_CAPABILITIES => respond_with_caps(msg, host_id.to_string(), caps.clone()),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Bad inventory topic!",
-            )),
-        }
-    });
+    let _ = nc
+        .read()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .subscribe(INVENTORY_SUBJECT)?
+        .with_handler(move |msg| {
+            trace!("Handling Inventory Request");
+            match msg.subject.clone().as_str() {
+                INVENTORY_HOSTS => {
+                    respond_with_host(msg, host_id.to_string(), started, lbs.clone())
+                }
+                INVENTORY_ACTORS => respond_with_actors(msg, host_id.to_string(), claims.clone()),
+                INVENTORY_BINDINGS => {
+                    respond_with_bindings(msg, host_id.to_string(), bindings.clone())
+                }
+                INVENTORY_CAPABILITIES => respond_with_caps(msg, host_id.to_string(), caps.clone()),
+                _ => Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Bad inventory topic!",
+                )),
+            }
+        });
     Ok(())
 }
 

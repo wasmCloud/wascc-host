@@ -18,6 +18,7 @@ This version corresponds to the project milestone 0.12
     * hostcore.arch
 
 * _Uptime_ - Uptime is now being tracked when the `lattice` feature is enabled, and will be reported in response to host probes on the control subject.
+* _Bus Events_ - When compiled in lattice mode, the waSCC host will emit events on the lattice that allow changes in state (e.g. actor start, stop, provider load, unload, etc) to be monitored either directly via NATS or with a command-line utility like `latticectl`
 
 ### Changed
 

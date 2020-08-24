@@ -109,6 +109,9 @@ pub use manifest::{BindingEntry, HostManifest};
 #[cfg(feature = "prometheus_middleware")]
 pub use middleware::prometheus;
 
+#[cfg(feature = "lattice")]
+use latticeclient::BusEvent;
+
 pub use authz::Authorizer;
 pub use middleware::Middleware;
 pub use wapc::{prelude::WasiParams, WapcHost};
@@ -186,21 +189,27 @@ impl WasccHost {
         let caps = Arc::new(RwLock::new(HashMap::new()));
         let bindings = Arc::new(RwLock::new(HashMap::new()));
         let labels = Arc::new(RwLock::new(inthost::detect_core_host_labels()));
+        let terminators = Arc::new(RwLock::new(HashMap::new()));
         #[cfg(feature = "lattice")]
-        let bus = bus::new(
+        let bus = Arc::new(bus::new(
             key.public_key(),
             claims.clone(),
             caps.clone(),
             bindings.clone(),
             labels.clone(),
-        );
+            terminators.clone(),
+        ));
+
         #[cfg(not(feature = "lattice"))]
-        let bus = bus::new();
+        let bus = Arc::new(bus::new());
+
+        #[cfg(feature = "lattice")]
+        let _ = bus.publish_event(BusEvent::HostStarted(key.public_key()));
 
         #[cfg(feature = "gantry")]
         let host = WasccHost {
-            terminators: Arc::new(RwLock::new(HashMap::new())),
-            bus: Arc::new(bus),
+            terminators: terminators.clone(),
+            bus: bus.clone(),
             claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             bindings,
@@ -213,8 +222,8 @@ impl WasccHost {
         };
         #[cfg(not(feature = "gantry"))]
         let host = WasccHost {
-            terminators: Arc::new(RwLock::new(HashMap::new())),
-            bus: Arc::new(bus),
+            terminators: terminators.clone(),
+            bus: bus.clone(),
             claims,
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             bindings,
@@ -225,6 +234,7 @@ impl WasccHost {
             labels,
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
+
         host.ensure_extras().unwrap();
         host
     }
@@ -490,7 +500,7 @@ impl WasccHost {
         } else {
             bus::provider_subject(capid, &binding)
         };
-        info!("Binding subject: {}", tgt_subject);
+        trace!("Binding subject: {}", tgt_subject);
         let inv = inthost::gen_config_invocation(
             &self.key,
             actor,
@@ -516,6 +526,13 @@ impl WasccHost {
                             values: config,
                         },
                     )?;
+                    #[cfg(feature = "lattice")]
+                    let _ = self.bus.publish_event(BusEvent::ActorBindingCreated {
+                        actor: actor.to_string(),
+                        capid: capid.to_string(),
+                        instance_name: binding.to_string(),
+                        host: self.id(),
+                    });
                     Ok(())
                 }
             }
@@ -652,6 +669,12 @@ impl WasccHost {
         for (binding_name, capid) in caps.keys() {
             self.remove_native_capability(&capid, Some(binding_name.to_string()))?;
         }
+        self.bus.disconnect();
         Ok(())
+    }
+
+    /// Returns the public key of the host
+    pub fn id(&self) -> String {
+        self.key.public_key()
     }
 }

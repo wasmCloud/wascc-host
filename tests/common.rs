@@ -9,7 +9,7 @@ pub fn get_hello2_actor() -> Result<Actor, Box<dyn Error>> {
     Actor::from_file("./examples/.assets/echo2.wasm").map_err(|e| e.into())
 }
 
-pub fn gen_stock_host() -> Result<WasccHost, Box<dyn Error>> {
+pub fn gen_stock_host(first_port: u16) -> Result<WasccHost, Box<dyn Error>> {
     let host = WasccHost::new();
     host.add_actor(get_hello_actor()?)?;
     host.add_actor(get_hello2_actor()?)?;
@@ -22,14 +22,14 @@ pub fn gen_stock_host() -> Result<WasccHost, Box<dyn Error>> {
         "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
         "wascc:http_server",
         Some("stockhost".to_string()),
-        generate_port_config(8087),
+        generate_port_config(first_port),
     )?;
 
     host.bind_actor(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
         Some("stockhost".to_string()),
-        generate_port_config(8088),
+        generate_port_config(first_port + 1),
     )?;
 
     Ok(host)

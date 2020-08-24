@@ -1,13 +1,9 @@
-#[allow(dead_code)]
-mod common;
-
 use reqwest;
 use std::error::Error;
 use wascc_host::WasccHost;
 
-#[test]
-fn stock_host() -> Result<(), Box<dyn Error>> {
-    let host = common::gen_stock_host()?;
+pub(crate) fn stock_host() -> Result<(), Box<dyn Error>> {
+    let host = crate::common::gen_stock_host(9090)?;
     assert_eq!(2, host.actors().len());
     if let Some(ref claims) =
         host.claims_for_actor("MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2")
@@ -22,21 +18,20 @@ fn stock_host() -> Result<(), Box<dyn Error>> {
 
     std::thread::sleep(::std::time::Duration::from_millis(500));
 
-    let resp = reqwest::blocking::get("http://localhost:8087")?;
+    let resp = reqwest::blocking::get("http://localhost:9090")?;
     assert!(resp.status().is_success());
     assert_eq!(resp.text()?,
-        "{\"method\":\"GET\",\"path\":\"/\",\"query_string\":\"\",\"headers\":{\"accept\":\"*/*\",\"host\":\"localhost:8087\"},\"body\":[]}"
+        "{\"method\":\"GET\",\"path\":\"/\",\"query_string\":\"\",\"headers\":{\"accept\":\"*/*\",\"host\":\"localhost:9090\"},\"body\":[]}"
     );
     host.shutdown()?;
-    std::thread::sleep(::std::time::Duration::from_millis(100));
+    std::thread::sleep(::std::time::Duration::from_millis(500));
     Ok(())
 }
 
-#[test]
-fn kv_host() -> Result<(), Box<dyn Error>> {
+pub(crate) fn kv_host() -> Result<(), Box<dyn Error>> {
     use redis::Commands;
 
-    let host = common::gen_kvcounter_host(8083, WasccHost::new())?;
+    let host = crate::common::gen_kvcounter_host(8083, WasccHost::new())?;
     std::thread::sleep(::std::time::Duration::from_millis(100));
     let key = uuid::Uuid::new_v4().to_string();
     let rkey = format!(":{}", key); // the kv wasm logic does a replace on '/' with ':'
