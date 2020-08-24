@@ -1,17 +1,3 @@
-// Copyright 2015-2020 Capital One Services, LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use crate::Result;
 
 use crate::bus;
@@ -94,7 +80,7 @@ pub(crate) fn spawn_actor(
         let mut d: Option<CapabilityDescriptor> = None;
 
         let subscribe_subject = if actor {
-            bus::actor_subject(&claims.subject)
+            b.actor_subject(&claims.subject)
         } else {
             d = match get_descriptor(&mut guest) {
                 Ok(d) => Some(d),
@@ -112,7 +98,7 @@ pub(crate) fn spawn_actor(
                 instance_name: binding.to_string(),
             });
 
-            bus::provider_subject(&capid, binding.as_ref())
+            b.provider_subject(&capid, binding.as_ref())
         };
 
         let (inv_s, inv_r): (Sender<Invocation>, Receiver<Invocation>) = channel::unbounded();
@@ -128,7 +114,7 @@ pub(crate) fn spawn_actor(
             .unwrap()
             .insert(subscribe_subject.clone(), term_s);
         let _ = b.subscribe(&subscribe_subject, inv_s, resp_r).unwrap();
-        drop(wg); // Let the WasccHost wrapper function return
+        drop(wg); // Let the Host wrapper function return
         if actor {
             #[cfg(feature = "lattice")]
             let _ = b.publish_event(BusEvent::ActorStarted {
@@ -220,7 +206,7 @@ pub(crate) fn spawn_native_capability(
         let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
             channel::unbounded();
         let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
-        let subscribe_subject = bus::provider_subject(&capid, &binding);
+        let subscribe_subject = bus.provider_subject(&capid, &binding);
 
         let _ = bus.subscribe(&subscribe_subject, inv_s, resp_r).unwrap();
         let dispatcher = WasccNativeDispatcher::new(hk.clone(), bus.clone(), &capid, &binding);
@@ -303,7 +289,7 @@ fn spawn_bound_native_capability(
         let (resp_s, resp_r): (Sender<InvocationResponse>, Receiver<InvocationResponse>) =
             channel::unbounded();
         let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
-        let subscribe_subject = bus::provider_subject_bound_actor(&capid, &binding, &actor);
+        let subscribe_subject = bus.provider_subject_bound_actor(&capid, &binding, &actor);
 
         let _ = bus.subscribe(&subscribe_subject, inv_s, resp_r).unwrap();
         terms

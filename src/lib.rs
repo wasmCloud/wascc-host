@@ -1,18 +1,4 @@
 #![doc(html_logo_url = "https://avatars0.githubusercontent.com/u/52050279?s=200&v=4")]
-// Copyright 2015-2020 Capital One Services, LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 //! # waSCC Host
 //!
 //! The WebAssembly Secure Capabilities Connector (waSCC) host runtime manages actors
@@ -26,11 +12,11 @@
 //! # Example
 //! ```
 //! use std::collections::HashMap;
-//! use wascc_host::{WasccHost, Actor, NativeCapability};
+//! use wascc_host::{Host, Actor, NativeCapability};
 //!
 //! fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //!    env_logger::init();
-//!    let host = WasccHost::new();
+//!    let host = Host::new();
 //!    host.add_actor(Actor::from_file("./examples/.assets/echo.wasm")?)?;
 //!    host.add_actor(Actor::from_file("./examples/.assets/echo2.wasm")?)?;
 //!    host.add_native_capability(NativeCapability::from_file(
@@ -99,6 +85,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const REVISION: u32 = 2;
 
 pub type Result<T> = std::result::Result<T, errors::Error>;
+
 pub use actor::Actor;
 pub use capability::NativeCapability;
 pub use inthost::{Invocation, InvocationResponse, WasccEntity};
@@ -118,7 +105,7 @@ pub use wapc::{prelude::WasiParams, WapcHost};
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
-use bus::MessageBus;
+use bus::{get_namespace_prefix, MessageBus};
 use crossbeam::Sender;
 #[cfg(any(feature = "lattice", feature = "manifest"))]
 use inthost::RESTRICTED_LABELS;
@@ -134,7 +121,7 @@ use wascc_codec::{
     core::{CapabilityConfiguration, OP_BIND_ACTOR},
     SYSTEM_ACTOR,
 };
-//type BindingsList = Vec<(String, String, String)>;
+
 type BindingsList = HashMap<BindingTuple, CapabilityConfiguration>;
 type BindingTuple = (String, String, String); // (from-actor, to-capid, to-binding-name)
 
@@ -155,9 +142,66 @@ impl RouteKey {
     }
 }
 
+/// A builder pattern implementation for creating a custom-configured host runtime
+pub struct HostBuilder {
+    labels: HashMap<String, String>,
+    ns: Option<String>,
+    authorizer: Box<dyn Authorizer + 'static>,
+}
+
+impl HostBuilder {
+    /// Creates a new host builder. This builder will initialize itself with some defaults
+    /// obtained from the environment. The labels list will pre-populate with the `hostcore.*`
+    /// labels, the namespace will be glaned from the `LATTICE_NAMESPACE` environment variable
+    /// (if lattice mode is enabled), and the default authorizer will be set.
+    pub fn new() -> HostBuilder {
+        HostBuilder {
+            labels: inthost::detect_core_host_labels(),
+            ns: get_namespace_prefix(),
+            authorizer: Box::new(authz::DefaultAuthorizer::new()),
+        }
+    }
+
+    /// Sets the lattice namespace for this host. A lattice namespace is a unit of multi-tenant
+    /// isolation on a network
+    #[cfg(feature = "lattice")]
+    pub fn with_lattice_namespace(self, ns: String) -> HostBuilder {
+        HostBuilder {
+            ns: Some(ns),
+            ..self
+        }
+    }
+
+    /// Sets a custom authorizer to be used for authorizing actors, capability providers,
+    /// and invocation requests. Note that the authorizer cannot be used to implement _less_
+    /// strict measures than the default authorizer, it can only be used to implement
+    /// _more_ strict rules
+    pub fn with_authorizer(self, authorizer: impl Authorizer + 'static) -> HostBuilder {
+        HostBuilder {
+            authorizer: Box::new(authorizer),
+            ..self
+        }
+    }
+
+    /// Adds an arbitrary label->value pair of metadata to the host. Cannot override
+    /// reserved labels such as those that begin with `hostcore.`
+    pub fn with_label(self, key: &str, value: &str) -> HostBuilder {
+        let mut hm = self.labels.clone();
+        if !hm.contains_key(key) {
+            hm.insert(key.to_string(), value.to_string());
+        }
+        HostBuilder { labels: hm, ..self }
+    }
+
+    /// Converts the transient builder instance into a realized host runtime instance
+    pub fn build(self) -> Host {
+        Host::generate(self.authorizer, self.labels, self.ns.clone())
+    }
+}
+
 /// Represents an instance of a waSCC host
 #[derive(Clone)]
-pub struct WasccHost {
+pub struct Host {
     bus: Arc<MessageBus>,
     claims: Arc<RwLock<HashMap<String, Claims<wascap::jwt::Actor>>>>,
     plugins: Arc<RwLock<PluginManager>>,
@@ -171,25 +215,32 @@ pub struct WasccHost {
     key: KeyPair,
     authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
     labels: Arc<RwLock<HashMap<String, String>>>,
+    ns: Option<String>,
 }
 
-impl WasccHost {
-    /// Creates a new waSCC runtime host
+impl Host {
+    /// Creates a new runtime host using all of the default values. Use the host builder
+    /// if you want to provide more customization options
     pub fn new() -> Self {
-        Self::with_authorizer(authz::DefaultAuthorizer::new())
+        Self::generate(
+            Box::new(authz::DefaultAuthorizer::new()),
+            inthost::detect_core_host_labels(),
+            get_namespace_prefix(),
+        )
     }
 
-    /// Creates a waSCC host with the given authorizer to be used for supplemental authorization checks
-    /// *after* the base claims check is performed. The authorizer can add further restrictions
-    /// to actors consuming capabilities, and can determine whether one actor is allowed to
-    /// invoke another (including itself, which can occur during manual configuration by a host).
-    pub fn with_authorizer(authz: impl Authorizer + 'static) -> Self {
+    pub(crate) fn generate(
+        authz: Box<dyn Authorizer + 'static>,
+        labels: HashMap<String, String>,
+        ns: Option<String>,
+    ) -> Self {
         let key = KeyPair::new_server();
         let claims = Arc::new(RwLock::new(HashMap::new()));
         let caps = Arc::new(RwLock::new(HashMap::new()));
         let bindings = Arc::new(RwLock::new(HashMap::new()));
-        let labels = Arc::new(RwLock::new(inthost::detect_core_host_labels()));
+        let labels = Arc::new(RwLock::new(labels));
         let terminators = Arc::new(RwLock::new(HashMap::new()));
+
         #[cfg(feature = "lattice")]
         let bus = Arc::new(bus::new(
             key.public_key(),
@@ -198,6 +249,7 @@ impl WasccHost {
             bindings.clone(),
             labels.clone(),
             terminators.clone(),
+            ns.clone(),
         ));
 
         #[cfg(not(feature = "lattice"))]
@@ -207,7 +259,7 @@ impl WasccHost {
         let _ = bus.publish_event(BusEvent::HostStarted(key.public_key()));
 
         #[cfg(feature = "gantry")]
-        let host = WasccHost {
+        let host = Host {
             terminators: terminators.clone(),
             bus: bus.clone(),
             claims,
@@ -217,11 +269,12 @@ impl WasccHost {
             middlewares: Arc::new(RwLock::new(vec![])),
             gantry_client: Arc::new(RwLock::new(None)),
             key: key,
-            authorizer: Arc::new(RwLock::new(Box::new(authz))),
+            authorizer: Arc::new(RwLock::new(authz)),
             labels,
+            ns,
         };
         #[cfg(not(feature = "gantry"))]
-        let host = WasccHost {
+        let host = Host {
             terminators: terminators.clone(),
             bus: bus.clone(),
             claims,
@@ -230,8 +283,9 @@ impl WasccHost {
             middlewares: Arc::new(RwLock::new(vec![])),
             caps,
             key: key,
-            authorizer: Arc::new(RwLock::new(Box::new(authz))),
+            authorizer: Arc::new(RwLock::new(authz)),
             labels,
+            ns,
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
 
@@ -380,7 +434,8 @@ impl WasccHost {
     /// Removes an actor from the host. Notifies the actor's processing thread to terminate,
     /// which will in turn attempt to unbind that actor from all previously bound capability providers
     pub fn remove_actor(&self, pk: &str) -> Result<()> {
-        self.terminators.read().unwrap()[&bus::actor_subject(pk)]
+        self.terminators.read().unwrap()
+            [&bus::actor_subject(self.ns.as_ref().map(String::as_str), pk)]
             .send(true)
             .unwrap();
         Ok(())
@@ -410,7 +465,7 @@ impl WasccHost {
             .contains_key(&RouteKey::new(&capability.binding_name, &capability.id()))
         {
             return Err(errors::new(errors::ErrorKind::CapabilityProvider(format!(
-                "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name                
+                "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", capid, capability.binding_name
             ))));
         }
         self.caps.write().unwrap().insert(
@@ -439,7 +494,8 @@ impl WasccHost {
         binding_name: Option<String>,
     ) -> Result<()> {
         let b = binding_name.unwrap_or("default".to_string());
-        let subject = bus::provider_subject(capability_id, &b);
+        let subject =
+            bus::provider_subject(self.ns.as_ref().map(String::as_str), capability_id, &b);
         if let Some(terminator) = self.terminators.read().unwrap().get(&subject) {
             terminator.send(true).unwrap();
             Ok(())
@@ -496,9 +552,9 @@ impl WasccHost {
 
         let tgt_subject = if (actor == capid || actor == SYSTEM_ACTOR) && capid.starts_with("M") {
             // manually injected actor configuration
-            bus::actor_subject(actor)
+            bus::actor_subject(self.ns.as_ref().map(String::as_str), actor)
         } else {
-            bus::provider_subject(capid, &binding)
+            bus::provider_subject(self.ns.as_ref().map(String::as_str), capid, &binding)
         };
         trace!("Binding subject: {}", tgt_subject);
         let inv = inthost::gen_config_invocation(
@@ -567,7 +623,7 @@ impl WasccHost {
             operation,
             msg.to_vec(),
         );
-        let tgt_subject = bus::actor_subject(actor);
+        let tgt_subject = bus::actor_subject(self.ns.as_ref().map(String::as_str), actor);
         match self.bus.invoke(&tgt_subject, inv) {
             Ok(resp) => Ok(resp.msg),
             Err(e) => Err(e),

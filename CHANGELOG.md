@@ -19,11 +19,14 @@ This version corresponds to the project milestone 0.12
 
 * _Uptime_ - Uptime is now being tracked when the `lattice` feature is enabled, and will be reported in response to host probes on the control subject.
 * _Bus Events_ - When compiled in lattice mode, the waSCC host will emit events on the lattice that allow changes in state (e.g. actor start, stop, provider load, unload, etc) to be monitored either directly via NATS or with a command-line utility like `latticectl`
+* _Lattice Namespaces_ - You can now provide a namespace as a unit of isolation. This allows you to run multiple hosts on multiple isolated lattices all on top of the same NATS infrastructure. This can be done through the `LATTICE_NAMESPACE` environment variable or explicitly through the new `HostBuilder`
+* _HostBuilder_ - A new builder syntax is available to more fluently configure a new host.
 
 ### Changed
 
 * The `wascc_host` binary will now default its log level to `INFO`, and you can override this behavior with the standard `RUST_LOG` environment variable syntax.
 * The crate's `Error` type now requires `Send` and `Sync`. This should have very little impact on consumers.
+* The `WasccHost` struct has been renamed to `Host`. Per Rust style guidelines, structs should not be prefixed with their module names.
 
 ## [0.11.0] - 2020 JUL 24
 

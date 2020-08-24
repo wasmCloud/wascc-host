@@ -1,5 +1,5 @@
 use std::{collections::HashMap, error::Error};
-use wascc_host::{Actor, NativeCapability, WasccHost};
+use wascc_host::{Actor, Host, NativeCapability};
 
 pub fn get_hello_actor() -> Result<Actor, Box<dyn Error>> {
     Actor::from_file("./examples/.assets/echo.wasm").map_err(|e| e.into())
@@ -9,8 +9,8 @@ pub fn get_hello2_actor() -> Result<Actor, Box<dyn Error>> {
     Actor::from_file("./examples/.assets/echo2.wasm").map_err(|e| e.into())
 }
 
-pub fn gen_stock_host(first_port: u16) -> Result<WasccHost, Box<dyn Error>> {
-    let host = WasccHost::new();
+pub fn gen_stock_host(first_port: u16) -> Result<Host, Box<dyn Error>> {
+    let host = Host::new();
     host.add_actor(get_hello_actor()?)?;
     host.add_actor(get_hello2_actor()?)?;
     host.add_native_capability(NativeCapability::from_file(
@@ -35,7 +35,7 @@ pub fn gen_stock_host(first_port: u16) -> Result<WasccHost, Box<dyn Error>> {
     Ok(host)
 }
 
-pub fn gen_kvcounter_host(port: u16, host: WasccHost) -> Result<WasccHost, Box<dyn Error>> {
+pub fn gen_kvcounter_host(port: u16, host: Host) -> Result<Host, Box<dyn Error>> {
     host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
     host.add_native_capability(NativeCapability::from_file(
         "./examples/.assets/libwascc_httpsrv.so",

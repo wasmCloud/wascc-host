@@ -1,9 +1,9 @@
 use std::error::Error;
-use wascc_host::{Actor, Authorizer, NativeCapability, WasccHost};
+use wascc_host::{Actor, Authorizer, Host, HostBuilder, NativeCapability};
 
 pub(crate) fn default_authorizer_enforces_cap_attestations() -> Result<(), Box<dyn Error>> {
     // Attempt to bind an actor to a capability for which it isn't authorized.
-    let host = WasccHost::new();
+    let host = Host::new();
     host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
 
     host.add_native_capability(NativeCapability::from_file(
@@ -26,7 +26,9 @@ pub(crate) fn default_authorizer_enforces_cap_attestations() -> Result<(), Box<d
 pub(crate) fn authorizer_blocks_bindings() -> Result<(), Box<dyn Error>> {
     // Set the authorizer before calling a bind_actor, and bind_actor should
     // return permission denied / Err if the authorizer denies that invocation.
-    let host = WasccHost::with_authorizer(DenyAuthorizer::new(false, true));
+    let host = HostBuilder::new()
+        .with_authorizer(DenyAuthorizer::new(false, true))
+        .build();
 
     host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
     host.add_native_capability(NativeCapability::from_file(
@@ -54,7 +56,10 @@ pub(crate) fn authorizer_blocks_bindings() -> Result<(), Box<dyn Error>> {
 pub(crate) fn authorizer_blocks_load() -> Result<(), Box<dyn Error>> {
     // Set the authorizer before calling a bind_actor, and bind_actor should
     // return permission denied / Err if the authorizer denies that invocation.
-    let host = WasccHost::with_authorizer(DenyAuthorizer::new(true, false));
+    let host = HostBuilder::new()
+        .with_authorizer(DenyAuthorizer::new(true, false))
+        .build();
+
     let res = host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?);
 
     assert!(res.is_err());

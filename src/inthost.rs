@@ -1,6 +1,6 @@
-// Implementations of support functions for the `WasccHost` struct
+// Implementations of support functions for the `Host` struct
 
-use super::WasccHost;
+use super::Host;
 use crate::Result;
 use data_encoding::HEXUPPER;
 use ring::digest::{Context, Digest, SHA256};
@@ -42,11 +42,11 @@ pub(crate) fn unsub_all_bindings(
         .keys()
         .filter(|(_a, c, _b)| c == capid)
         .for_each(|(a, c, b)| {
-            let _ = bus.unsubscribe(&bus::provider_subject_bound_actor(c, b, a));
+            let _ = bus.unsubscribe(&bus.provider_subject_bound_actor(c, b, a));
         });
 }
 
-impl WasccHost {
+impl Host {
     pub(crate) fn record_binding(
         &self,
         actor: &str,
@@ -100,7 +100,7 @@ pub(crate) fn replace_actor(
     new_actor: Actor,
 ) -> Result<()> {
     let public_key = new_actor.token.claims.subject;
-    let tgt_subject = crate::bus::actor_subject(&public_key);
+    let tgt_subject = bus.actor_subject(&public_key);
     let inv = gen_liveupdate_invocation(hostkey, &public_key, new_actor.bytes);
 
     match bus.invoke(&tgt_subject, inv) {
@@ -157,7 +157,7 @@ pub(crate) fn deconfigure_actor(
     for (actor, capid, binding) in nbindings {
         info!("Unbinding actor {} from {},{}", actor, binding, capid);
         let _inv_r = bus.invoke(
-            &bus::provider_subject_bound_actor(&capid, &binding, &actor),
+            &bus.provider_subject_bound_actor(&capid, &binding, &actor),
             gen_remove_actor(&hostkey, buf.clone(), &binding, &capid),
         );
         remove_binding(bindings.clone(), key, &binding, &capid);
@@ -416,9 +416,9 @@ pub(crate) fn wapc_host_callback(
     // Make a request on either `wasmbus.Mxxxxx` for an actor or `wasmbus.{capid}.{binding}.{calling-actor}` for
     // a bound capability provider
     let invoke_subject = match &inv.target {
-        WasccEntity::Actor(subject) => bus::actor_subject(subject),
+        WasccEntity::Actor(subject) => bus.actor_subject(subject),
         WasccEntity::Capability { capid, binding } => {
-            bus::provider_subject_bound_actor(capid, binding, &claims.subject)
+            bus.provider_subject_bound_actor(capid, binding, &claims.subject)
         }
     };
     match bus.invoke(&invoke_subject, inv) {

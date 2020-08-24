@@ -38,16 +38,36 @@ pub(crate) fn new(
     bindings: Arc<RwLock<BindingsList>>,
     labels: Arc<RwLock<HashMap<String, String>>>,
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
+    ns: Option<String>,
 ) -> MessageBus {
-    lattice::DistributedBus::new(host_id, claims, caps, bindings, labels, terminators)
+    lattice::DistributedBus::new(host_id, claims, caps, bindings, labels, terminators, ns)
 }
 
-pub(crate) fn actor_subject(actor: &str) -> String {
-    format!("wasmbus.actor.{}", actor)
+const LATTICE_NAMESPACE_ENV: &str = "LATTICE_NAMESPACE";
+
+pub(crate) fn get_namespace_prefix() -> Option<String> {
+    ::std::env::var(LATTICE_NAMESPACE_ENV).ok()
 }
 
-pub(crate) fn provider_subject(capid: &str, binding: &str) -> String {
-    format!("wasmbus.provider.{}.{}", normalize_capid(capid), binding)
+pub(crate) fn actor_subject(ns: Option<&str>, actor: &str) -> String {
+    format!("{}.actor.{}", nsprefix(ns), actor)
+}
+
+pub(crate) fn provider_subject(ns: Option<&str>, capid: &str, binding: &str) -> String {
+    format!(
+        "{}.provider.{}.{}",
+        nsprefix(ns),
+        normalize_capid(capid),
+        binding
+    )
+}
+
+pub(crate) fn inventory_wildcard_subject(ns: Option<&str>) -> String {
+    format!("{}.inventory.*", nsprefix(ns))
+}
+
+pub(crate) fn event_subject(ns: Option<&str>) -> String {
+    format!("{}.events", nsprefix(ns))
 }
 
 // By convention most of the waSCC ecosystem uses a "group:item" string
@@ -59,14 +79,23 @@ pub(crate) fn normalize_capid(capid: &str) -> String {
 }
 
 pub(crate) fn provider_subject_bound_actor(
+    ns: Option<&str>,
     capid: &str,
     binding: &str,
     calling_actor: &str,
 ) -> String {
     format!(
-        "wasmbus.provider.{}.{}.{}",
+        "{}.provider.{}.{}.{}",
+        nsprefix(ns),
         normalize_capid(capid),
         binding,
         calling_actor
     )
+}
+
+fn nsprefix(ns: Option<&str>) -> String {
+    match ns {
+        Some(s) => format!("{}.wasmbus", s),
+        None => "wasmbus".to_string(),
+    }
 }
