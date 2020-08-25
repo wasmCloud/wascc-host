@@ -3,7 +3,7 @@
 // features enabled, you can do that as follows from the root wascc-host directory:
 // cargo run --example kvcounter_manfifest --all-features
 
-use wascc_host::{HostManifest, WasccHost};
+use wascc_host::{Host, HostManifest};
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _ = env_logger::Builder::from_env(
@@ -11,7 +11,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .format_module_path(false)
     .try_init();
-    let host = WasccHost::new();
+    let host = Host::new();
     host.apply_manifest(HostManifest::from_path(
         "./examples/sample_manifest.yaml",
         true,

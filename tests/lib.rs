@@ -39,6 +39,12 @@ fn lattice_single_host() -> Result<(), Box<dyn Error>> {
 
 #[test]
 #[cfg(feature = "lattice")]
+fn lattice_isolation() -> Result<(), Box<dyn Error>> {
+    lattice::lattice_isolation()
+}
+
+#[test]
+#[cfg(feature = "lattice")]
 fn lattice_events() -> Result<(), Box<dyn Error>> {
     lattice::lattice_events()
 }

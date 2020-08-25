@@ -1,7 +1,7 @@
 use crate::{BindingsList, RouteKey};
 use crate::{Invocation, InvocationResponse, Result};
 use crossbeam::{Receiver, Sender};
-use latticeclient::{BusEvent, CloudEvent, BUS_EVENT_SUBJECT};
+use latticeclient::{BusEvent, CloudEvent};
 use nats;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -18,8 +18,7 @@ const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
 const TERM_BACKOFF_MAX_TRIES: u8 = 3;
 const TERM_BACKOFF_DELAY_MS: u64 = 50;
 
-const INVENTORY_SUBJECT: &str = "wasmbus.inventory.*";
-
+use crate::bus::event_subject;
 use latticeclient::*;
 
 pub(crate) struct DistributedBus {
@@ -28,6 +27,7 @@ pub(crate) struct DistributedBus {
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     req_timeout: Duration,
     host_id: String,
+    ns: Option<String>,
 }
 
 impl DistributedBus {
@@ -38,10 +38,18 @@ impl DistributedBus {
         bindings: Arc<RwLock<BindingsList>>,
         labels: Arc<RwLock<HashMap<String, String>>>,
         terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
+        ns: Option<String>,
     ) -> Self {
         let nc = Arc::new(RwLock::new(Some(get_connection())));
 
-        info!("Initialized Message Bus (lattice)");
+        info!(
+            "Initialized Lattice Message Bus ({})",
+            if let Some(ref s) = ns {
+                s
+            } else {
+                "default namespace"
+            }
+        );
         spawn_inventory_handler(
             nc.clone(),
             host_id.to_string(),
@@ -50,6 +58,7 @@ impl DistributedBus {
             caps.clone(),
             SystemTime::now(),
             labels,
+            ns.clone(),
         )
         .unwrap();
         DistributedBus {
@@ -58,6 +67,7 @@ impl DistributedBus {
             terminators,
             req_timeout: get_timeout(),
             host_id,
+            ns: ns.clone(),
         }
     }
 
@@ -126,9 +136,39 @@ impl DistributedBus {
         };
         let lock = self.nc.read().unwrap();
         if let Some(ref nc) = lock.as_ref() {
-            let _ = nc.publish(BUS_EVENT_SUBJECT, &payload);
+            let _ = nc.publish(&*self.event_subject(), &payload);
         }
         Ok(())
+    }
+
+    pub fn actor_subject(&self, actor: &str) -> String {
+        super::actor_subject(self.ns.as_ref().map(String::as_str), actor)
+    }
+
+    pub(crate) fn provider_subject(&self, capid: &str, binding: &str) -> String {
+        super::provider_subject(self.ns.as_ref().map(String::as_str), capid, binding)
+    }
+
+    pub(crate) fn inventory_wildcard_subject(&self) -> String {
+        super::inventory_wildcard_subject(self.ns.as_ref().map(String::as_str))
+    }
+
+    pub(crate) fn event_subject(&self) -> String {
+        super::event_subject(self.ns.as_ref().map(String::as_str))
+    }
+
+    pub(crate) fn provider_subject_bound_actor(
+        &self,
+        capid: &str,
+        binding: &str,
+        calling_actor: &str,
+    ) -> String {
+        super::provider_subject_bound_actor(
+            self.ns.as_ref().map(String::as_str),
+            capid,
+            binding,
+            calling_actor,
+        )
     }
 }
 
@@ -140,29 +180,32 @@ fn spawn_inventory_handler(
     caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
     started: SystemTime,
     labels: Arc<RwLock<HashMap<String, String>>>,
+    ns: Option<String>,
 ) -> Result<()> {
     let lbs = labels.clone();
+    let subject = super::inventory_wildcard_subject(ns.as_ref().map(String::as_str));
+
     let _ = nc
         .read()
         .unwrap()
         .as_ref()
         .unwrap()
-        .subscribe(INVENTORY_SUBJECT)?
+        .subscribe(&subject)?
         .with_handler(move |msg| {
             trace!("Handling Inventory Request");
-            match msg.subject.clone().as_str() {
-                INVENTORY_HOSTS => {
-                    respond_with_host(msg, host_id.to_string(), started, lbs.clone())
-                }
-                INVENTORY_ACTORS => respond_with_actors(msg, host_id.to_string(), claims.clone()),
-                INVENTORY_BINDINGS => {
-                    respond_with_bindings(msg, host_id.to_string(), bindings.clone())
-                }
-                INVENTORY_CAPABILITIES => respond_with_caps(msg, host_id.to_string(), caps.clone()),
-                _ => Err(std::io::Error::new(
+            if msg.subject.contains(INVENTORY_HOSTS) {
+                respond_with_host(msg, host_id.to_string(), started, lbs.clone())
+            } else if msg.subject.contains(INVENTORY_ACTORS) {
+                respond_with_actors(msg, host_id.to_string(), claims.clone())
+            } else if msg.subject.contains(INVENTORY_BINDINGS) {
+                respond_with_bindings(msg, host_id.to_string(), bindings.clone())
+            } else if msg.subject.contains(INVENTORY_CAPABILITIES) {
+                respond_with_caps(msg, host_id.to_string(), caps.clone())
+            } else {
+                Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "Bad inventory topic!",
-                )),
+                ))
             }
         });
     Ok(())

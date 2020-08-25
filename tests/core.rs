@@ -1,6 +1,6 @@
 use reqwest;
 use std::error::Error;
-use wascc_host::WasccHost;
+use wascc_host::Host;
 
 pub(crate) fn stock_host() -> Result<(), Box<dyn Error>> {
     let host = crate::common::gen_stock_host(9090)?;
@@ -31,7 +31,7 @@ pub(crate) fn stock_host() -> Result<(), Box<dyn Error>> {
 pub(crate) fn kv_host() -> Result<(), Box<dyn Error>> {
     use redis::Commands;
 
-    let host = crate::common::gen_kvcounter_host(8083, WasccHost::new())?;
+    let host = crate::common::gen_kvcounter_host(8083, Host::new())?;
     std::thread::sleep(::std::time::Duration::from_millis(100));
     let key = uuid::Uuid::new_v4().to_string();
     let rkey = format!(":{}", key); // the kv wasm logic does a replace on '/' with ':'
