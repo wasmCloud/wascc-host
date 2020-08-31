@@ -165,9 +165,9 @@ impl HostBuilder {
     /// Sets the lattice namespace for this host. A lattice namespace is a unit of multi-tenant
     /// isolation on a network
     #[cfg(feature = "lattice")]
-    pub fn with_lattice_namespace(self, ns: String) -> HostBuilder {
+    pub fn with_lattice_namespace(self, ns: &str) -> HostBuilder {
         HostBuilder {
-            ns: Some(ns),
+            ns: Some(ns.to_string()),
             ..self
         }
     }

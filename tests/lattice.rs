@@ -3,15 +3,18 @@ use std::error::Error;
 
 pub(crate) fn lattice_single_host() -> Result<(), Box<dyn Error>> {
     use std::time::Duration;
-    use wascc_host::Host;
+    use wascc_host::{Host, HostBuilder};
 
-    let host = Host::new();
+    let host = HostBuilder::new()
+        .with_lattice_namespace("singlehost")
+        .build();
+
     host.set_label("integration", "test");
     host.set_label("hostcore.arch", "FOOBAR"); // this should be ignored
     let delay = Duration::from_millis(500);
     std::thread::sleep(delay);
 
-    let lc = Client::new("127.0.0.1", None, delay, None);
+    let lc = Client::new("127.0.0.1", None, delay, Some("singlehost".to_string()));
     let hosts = lc.get_hosts()?;
     assert_eq!(hosts.len(), 1);
     assert_eq!(hosts[0].labels["hostcore.os"], std::env::consts::OS);
@@ -27,14 +30,14 @@ pub(crate) fn lattice_single_host() -> Result<(), Box<dyn Error>> {
 }
 
 pub(crate) fn lattice_isolation() -> Result<(), Box<dyn Error>> {
-    use ::std::time::Duration;
+    use std::time::Duration;
     use wascc_host::{Host, HostBuilder};
     let host1 = HostBuilder::new()
-        .with_lattice_namespace("system.1".to_string())
+        .with_lattice_namespace("system.1")
         .with_label("testval", "1")
         .build();
     let host2 = HostBuilder::new()
-        .with_lattice_namespace("system.2".to_string())
+        .with_lattice_namespace("system.2")
         .with_label("testval", "2")
         .build();
 

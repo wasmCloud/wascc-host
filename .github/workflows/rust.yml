@@ -37,14 +37,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2       
-      - name: Run tests Gantry+Manifest
-        run: cargo test --verbose --features "manifest gantry bin"      
+      - name: Run tests (Everything but Lattice)
+        run: cargo test --verbose --features "manifest gantry bin prometheus_middleware"      
       - name: Run tests (manifest only)
         run: cargo test --verbose --features "manifest"      
       - name: Run tests (gantry only)
         run: cargo test --verbose --features "gantry"      
       - name: Run tests (lattice mode)
-        run: cargo test --features "lattice manifest" --test integration -- --test-threads=1
+        run: cargo test --features "lattice bin manifest gantry" --test integration -- --test-threads=1
         env:
           LATTICE_HOST: 0.0.0.0
           LATTICE_RPC_TIMEOUT_MILLIS: 100
