@@ -42,7 +42,17 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     host.apply_manifest(manifest)?;
     info!("Processed and applied host manifest");
 
-    std::thread::park();
+    let (term_s, term_r) = std::sync::mpsc::channel();
+
+    ctrlc::set_handler(move || {
+        term_s.send(()).unwrap();
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    term_r.recv().expect("Failed awaiting termination signal");
+
+    info!("Shutting down host");
+    host.shutdown()?;
 
     Ok(())
 }

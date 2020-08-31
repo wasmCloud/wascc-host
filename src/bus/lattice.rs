@@ -136,7 +136,8 @@ impl DistributedBus {
         };
         let lock = self.nc.read().unwrap();
         if let Some(ref nc) = lock.as_ref() {
-            let _ = nc.publish(&*self.event_subject(), &payload);
+            nc.publish(&*self.event_subject(), &payload)?;
+            nc.flush()?;
         }
         Ok(())
     }
