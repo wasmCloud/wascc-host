@@ -88,9 +88,17 @@ jobs:
           asset_path: ./wascchost-${{ matrix.os }}.zip
           asset_name: wascchost-${{ steps.get_version.outputs.VERSION }}-${{ env.OS_LABEL }}-x86_64.zip
           asset_content_type: application/zip  
-#      - name: Cargo Login
-#          env: 
-#            CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
-#          run: cargo login ${{ env.CRATES_TOKEN }}
-#      - name: Cargo publish
-#          run: cargo publish
+
+
+  crates:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: Cargo login
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo login ${{ env.CRATES_TOKEN }}
+      - name: Cargo publish
+        run: cargo publish --no-verify        
