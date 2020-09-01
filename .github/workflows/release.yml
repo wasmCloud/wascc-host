@@ -46,17 +46,15 @@ jobs:
         with:
           name: release_url
       - name: Create release Build
-        run: cargo build --features "bin manifest gantry lattice" --release        
-
-      - name: Create release ZIP (win)
+        run: cargo build --features "bin manifest gantry lattice" --release              
+      - name: Install 7Zip PowerShell Module (win)
         if: ${{ startsWith(matrix.os, 'windows') }}
-        uses: montudor/action-zip@v0.1.0
-        with:
-          args: zip -j wascchost-${{ matrix.os }}.zip "./target/release/wascc-host.exe"      
-#      - name: Append Release Zip (windows)
-#        if: ${{ startsWith(matrix.os, 'windows') }}
-#        run: "C:\Program Files\7zip\7z.exe "
-#        run: powershell Compress-7Zip "target\release\wascc-host.exe" -ArchiveFileName "wascchost-${{matrix.os}}.zip" -Format Zip
+        shell: powershell
+        run: Install-Module 7Zip4PowerShell -Force -Verbose
+      - name: Create Release Zip (windows)
+        if: ${{ startsWith(matrix.os, 'windows') }}
+#        run: "C:\Program Files\7zip\7z.exe" a wascchost-${{ matrix.os }}.zip "target\release\wascc-host.exe"
+        run: powershell Compress-7Zip "target\release\wascc-host.exe" -ArchiveFileName "wascchost-${{matrix.os}}.zip" -Format Zip
       - name: Create Release Zip (ubuntu)
         if: ${{ startsWith(matrix.os, 'ubuntu') }}
         run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host
