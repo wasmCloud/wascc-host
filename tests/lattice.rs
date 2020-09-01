@@ -91,6 +91,12 @@ pub(crate) fn lattice_events() -> Result<(), Box<dyn Error>> {
     std::thread::sleep(delay);
     nc.close();
 
+    // * While these events are _mostly_ in deterministic order, because of the nature
+    // of the fact that the capability providers are on background threads and
+    // other events are issued by foreground threads, we can see certain events
+    // appear "out of order", which makes for frustrating CI builds, so we do a
+    // "contains" check here instead of checking on the exact delivery order.
+
     let a = [
         r.recv().unwrap(), // host started
         r.recv().unwrap(), // extras prov loaded
@@ -102,75 +108,68 @@ pub(crate) fn lattice_events() -> Result<(), Box<dyn Error>> {
         r.recv().unwrap(), // binding created
         // -- shut down
         r.recv().unwrap(), // actor stopped
-    ];
-    let b = [
         r.recv().unwrap(), // provider removed
         r.recv().unwrap(), // provider removed
         r.recv().unwrap(), // provider removed (remember "extras" is an omnipresent provider)
+        r.recv().unwrap(), // host stop -- the last gasp
     ];
-    let c = r.recv().unwrap(); // host stop -- the last gasp
-    assert_eq!(
-        a,
-        [
-            BusEvent::HostStarted(host.id()),
-            BusEvent::ProviderLoaded {
-                capid: "wascc:extras".to_string(),
-                instance_name: "default".to_string(),
-                host: host.id()
-            },
-            BusEvent::ActorStarting {
-                actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
-                host: host.id()
-            },
-            BusEvent::ActorStarted {
-                actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
-                host: host.id()
-            },
-            BusEvent::ProviderLoaded {
-                capid: "wascc:http_server".to_string(),
-                instance_name: "default".to_string(),
-                host: host.id()
-            },
-            BusEvent::ProviderLoaded {
-                capid: "wascc:keyvalue".to_string(),
-                instance_name: "default".to_string(),
-                host: host.id()
-            },
-            BusEvent::ActorBindingCreated {
-                actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
-                capid: "wascc:keyvalue".to_string(),
-                instance_name: "default".to_string(),
-                host: host.id()
-            },
-            BusEvent::ActorBindingCreated {
-                actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
-                capid: "wascc:http_server".to_string(),
-                instance_name: "default".to_string(),
-                host: host.id()
-            },
-            BusEvent::ActorStopped {
-                actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
-                host: host.id()
-            },
-        ]
-    );
-    // providers are stored in a hashmap, so they will be terminated in an unpredictable
-    // order because keys are not sorted
-    assert!(b.contains(&BusEvent::ProviderRemoved {
+
+    assert!(a.contains(&BusEvent::HostStarted(host.id())));
+    assert!(a.contains(&BusEvent::ProviderLoaded {
+        capid: "wascc:extras".to_string(),
+        instance_name: "default".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ActorStarting {
+        actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ActorStarted {
+        actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ProviderLoaded {
+        capid: "wascc:http_server".to_string(),
+        instance_name: "default".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ProviderLoaded {
+        capid: "wascc:keyvalue".to_string(),
+        instance_name: "default".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ActorBindingCreated {
+        actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
+        capid: "wascc:keyvalue".to_string(),
+        instance_name: "default".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ActorBindingCreated {
+        actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
+        capid: "wascc:http_server".to_string(),
+        instance_name: "default".to_string(),
+        host: host.id()
+    }));
+    assert!(a.contains(&BusEvent::ActorStopped {
+        actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ".to_string(),
+        host: host.id()
+    }));
+
+    assert!(a.contains(&BusEvent::ProviderRemoved {
         capid: "wascc:http_server".to_string(),
         host: host.id(),
         instance_name: "default".to_string()
     }));
-    assert!(b.contains(&BusEvent::ProviderRemoved {
+    assert!(a.contains(&BusEvent::ProviderRemoved {
         capid: "wascc:keyvalue".to_string(),
         host: host.id(),
         instance_name: "default".to_string()
     }));
-    assert!(b.contains(&BusEvent::ProviderRemoved {
+    assert!(a.contains(&BusEvent::ProviderRemoved {
         capid: "wascc:extras".to_string(),
         host: host.id(),
         instance_name: "default".to_string()
     }));
-    assert_eq!(c, BusEvent::HostStopped(host.id()));
+    assert!(a.contains(&BusEvent::HostStopped(host.id())));
     Ok(())
 }
