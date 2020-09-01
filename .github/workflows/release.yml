@@ -35,49 +35,49 @@ jobs:
 
     steps:
       - name: Checkout
-          uses: actions/checkout@v1
+        uses: actions/checkout@v1
       - name: Get the version
-          id: get_version
-          run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
       - name: Load Release URL File from release job
-          uses: actions/download-artifact@v1
-          with:
+        uses: actions/download-artifact@v1
+        with:
           name: release_url
       - name: Create release Build
-          run: cargo build --features "bin manifest gantry lattice" --release        
+        run: cargo build --features "bin manifest gantry lattice" --release        
       - name: Append Release Zip (windows)
-          if: ${{ startsWith(matrix.os, 'windows') }}
-          run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host.exe
+        if: ${{ startsWith(matrix.os, 'windows') }}
+        run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host.exe
       - name: Append Release Zip (ubuntu)
-          if: ${{ startsWith(matrix.os, 'ubuntu') }}
-          run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host
+        if: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host
       - name: Append Release Zip (mac)
-          if: ${{ startsWith(matrix.os, 'mac') }}
-          run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host            
+        if: ${{ startsWith(matrix.os, 'mac') }}
+        run: zip -j wascchost-${{ matrix.os }}.zip ./target/release/wascc-host            
       - name: Get Release File Name & Upload URL
-          id: get_release_info
-          run: |        
-            value=`cat release_url/release_url.txt`
-            echo ::set-output name=upload_url::$value   
+        id: get_release_info
+        run: |        
+          value=`cat release_url/release_url.txt`
+          echo ::set-output name=upload_url::$value   
       - name: Set friendly OS label (ubuntu)
-          if: ${{ startsWith(matrix.os, 'ubuntu') }}
-          run: echo ::set-env name=OS_LABEL::ubuntu
+        if: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: echo ::set-env name=OS_LABEL::ubuntu
       - name: Set friendly OS label (mac)
-          if: ${{ startsWith(matrix.os, 'mac') }}
-          run: echo ::set-env name=OS_LABEL::macos
+        if: ${{ startsWith(matrix.os, 'mac') }}
+        run: echo ::set-env name=OS_LABEL::macos
       - name: Set friendly OS label (ubuntu)
-          if: ${{ startsWith(matrix.os, 'windows') }}
-          run: echo ::set-env name=OS_LABEL::windows    
+        if: ${{ startsWith(matrix.os, 'windows') }}
+        run: echo ::set-env name=OS_LABEL::windows    
       - name: Upload Release Asset
-          id: upload-release-asset 
-          uses: actions/upload-release-asset@v1
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          
-          with:
-            upload_url: ${{ steps.get_release_info.outputs.upload_url }}
-            asset_path: ./wascc-host-${{ matrix.os }}.zip
-            asset_name: wascchost-${{ env.OS_LABEL }}-${{ steps.get_version.outputs.VERSION }}.zip
-            asset_content_type: application/zip  
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          
+        with:
+          upload_url: ${{ steps.get_release_info.outputs.upload_url }}
+          asset_path: ./wascc-host-${{ matrix.os }}.zip
+          asset_name: wascchost-${{ env.OS_LABEL }}-${{ steps.get_version.outputs.VERSION }}.zip
+          asset_content_type: application/zip  
 #      - name: Cargo Login
 #          env: 
 #            CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
