@@ -53,7 +53,6 @@ jobs:
         run: Install-Module 7Zip4PowerShell -Force -Verbose
       - name: Create Release Zip (windows)
         if: ${{ startsWith(matrix.os, 'windows') }}
-#        run: "C:\Program Files\7zip\7z.exe" a wascchost-${{ matrix.os }}.zip "target\release\wascc-host.exe"
         run: powershell Compress-7Zip "target\release\wascc-host.exe" -ArchiveFileName "wascchost-${{matrix.os}}.zip" -Format Zip
       - name: Create Release Zip (ubuntu)
         if: ${{ startsWith(matrix.os, 'ubuntu') }}
@@ -70,11 +69,12 @@ jobs:
           echo ::set-output name=upload_url::$value   
       - name: Set friendly OS label (ubuntu)
         if: ${{ startsWith(matrix.os, 'ubuntu') }}
-        run: echo ::set-env name=OS_LABEL::ubuntu
+        run: echo ::set-env name=OS_LABEL::linux
       - name: Set friendly OS label (mac)
         if: ${{ startsWith(matrix.os, 'mac') }}
         run: echo ::set-env name=OS_LABEL::macos
-      - name: Set friendly OS label (ubuntu)
+      - name: Set friendly OS label (windows)
+        shell: bash
         if: ${{ startsWith(matrix.os, 'windows') }}
         run: echo ::set-env name=OS_LABEL::windows    
       - name: Upload Release Asset
