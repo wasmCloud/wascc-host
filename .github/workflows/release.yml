@@ -77,8 +77,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          
         with:
           upload_url: ${{ steps.get_release_info.outputs.upload_url }}
-          asset_path: ./wascc-host-${{ matrix.os }}.zip
-          asset_name: wascchost-${{ env.OS_LABEL }}-${{ steps.get_version.outputs.VERSION }}.zip
+          asset_path: ./wascchost-${{ matrix.os }}.zip
+          asset_name: wascchost-${{ env.OS_LABEL }}-x86_64-${{ steps.get_version.outputs.VERSION }}.zip
           asset_content_type: application/zip  
 #      - name: Cargo Login
 #          env: 
