@@ -16,9 +16,12 @@ pub struct Actor {
 impl Actor {
     /// Create an actor from the bytes of a signed WebAssembly module. Attempting to load
     /// an unsigned module, or a module signed improperly, will result in an error
-    pub fn from_bytes(buf: Vec<u8>) -> Result<Actor> {
+    pub fn from_slice(buf: &[u8]) -> Result<Actor> {
         let token = authz::extract_claims(&buf)?;
-        Ok(Actor { token, bytes: buf })
+        Ok(Actor {
+            token,
+            bytes: buf.to_vec(),
+        })
     }
 
     /// Create an actor from a signed WebAssembly (`.wasm`) file
@@ -27,7 +30,7 @@ impl Actor {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
-        Actor::from_bytes(buf)
+        Actor::from_slice(&buf)
     }
 
     /// Obtain the actor's public key (The `sub` field of a JWT). This can be treated as a globally unique identifier

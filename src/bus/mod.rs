@@ -39,8 +39,20 @@ pub(crate) fn new(
     labels: Arc<RwLock<HashMap<String, String>>>,
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     ns: Option<String>,
+    cplane_s: Sender<lattice::ControlCommand>,
+    authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
 ) -> MessageBus {
-    lattice::DistributedBus::new(host_id, claims, caps, bindings, labels, terminators, ns)
+    lattice::DistributedBus::new(
+        host_id,
+        claims,
+        caps,
+        bindings,
+        labels,
+        terminators,
+        ns,
+        cplane_s,
+        authz,
+    )
 }
 
 const LATTICE_NAMESPACE_ENV: &str = "LATTICE_NAMESPACE";
@@ -93,7 +105,7 @@ pub(crate) fn provider_subject_bound_actor(
     )
 }
 
-fn nsprefix(ns: Option<&str>) -> String {
+pub(crate) fn nsprefix(ns: Option<&str>) -> String {
     match ns {
         Some(s) => format!("{}.wasmbus", s),
         None => "wasmbus".to_string(),

@@ -84,7 +84,7 @@ pub(crate) fn extract_claims(buf: &[u8]) -> Result<wascap::jwt::Token<wascap::jw
             let claims = token.claims.clone();
             let caps = claims.metadata.as_ref().unwrap().caps.clone();
             info!(
-                "Discovered capability attestations for actor {}: {}",
+                "Actor claims loaded for {} - {}",
                 &claims.subject,
                 caps.unwrap_or(vec![]).join(",")
             );
