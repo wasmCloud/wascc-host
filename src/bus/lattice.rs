@@ -82,7 +82,7 @@ impl DistributedBus {
             cplane_s,
             authz,
         )
-            .unwrap();
+        .unwrap();
 
         spawn_inventory_handler(
             nc.clone(),
@@ -94,7 +94,7 @@ impl DistributedBus {
             labels,
             ns.clone(),
         )
-            .unwrap();
+        .unwrap();
         DistributedBus {
             nc,
             subs: Arc::new(RwLock::new(HashMap::new())),
@@ -547,8 +547,8 @@ fn handle_invocation(
         error!("Invocation Antiforgery check failure: {}", e);
         let inv_r = InvocationResponse::error(&inv, &format!("Antiforgery check failure: {}", e));
         msg.respond(serialize(inv_r).unwrap()).unwrap();
-        // TODO: when we implement the issue, publish an antiforgery check event on wasmbus.events
-        // TODO: when we implement the issue, add the host origin of the invocation to the global lattice block list
+    // TODO: when we implement the issue, publish an antiforgery check event on wasmbus.events
+    // TODO: when we implement the issue, add the host origin of the invocation to the global lattice block list
     } else {
         sender.send(inv).unwrap();
         let inv_r = receiver.recv().unwrap();
