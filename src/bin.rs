@@ -50,7 +50,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
         info!("Starting without manifest");
         #[cfg(not(feature = "lattice"))]
-        warn!("Started without manifest and without lattice. This host cannot launch actors or providers.");
+        {
+            error!("Started without manifest and without lattice. This host cannot launch actors or providers. Shutting down.");
+            return Err("Started without manifest or lattice - unusable host".into());
+        }
     }
 
     let (term_s, term_r) = std::sync::mpsc::channel();
