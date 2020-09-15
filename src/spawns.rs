@@ -9,6 +9,8 @@ use crate::{
     Invocation, InvocationResponse, Middleware, RouteKey,
 };
 use authz::ClaimsMap;
+#[cfg(feature = "lattice")]
+use bus::lattice::ControlCommand;
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use crossbeam_utils::sync::WaitGroup;
@@ -121,6 +123,7 @@ pub(crate) fn spawn_actor(
                 host: hostkey.public_key(),
                 actor: claims.subject.to_string(),
             });
+            info!("Actor {} up and running.", &claims.subject);
         }
 
         loop {

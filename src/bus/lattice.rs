@@ -1,16 +1,27 @@
 use crate::{BindingsList, RouteKey};
 use crate::{Invocation, InvocationResponse, Result};
 use crossbeam::{Receiver, Sender};
-use latticeclient::{BusEvent, CloudEvent};
+use crossbeam_channel as channel;
+use latticeclient::{
+    controlplane::{
+        LaunchAck, LaunchAuctionRequest, LaunchAuctionResponse, LaunchCommand, TerminateCommand,
+        AUCTION_REQ, CPLANE_PREFIX, LAUNCH_ACTOR, TERMINATE_ACTOR,
+    },
+    BusEvent, CloudEvent,
+};
 use nats;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::thread;
 use std::time::{Duration, SystemTime};
+use wapc::prelude::*;
 use wascap::jwt::{Actor, Claims};
 use wascc_codec::{capabilities::CapabilityDescriptor, deserialize, serialize};
 
-const LATTICE_HOST_KEY: &str = "LATTICE_HOST"; // env var name
-const DEFAULT_LATTICE_HOST: &str = "127.0.0.1"; // default mode is anonymous via loopback
+const LATTICE_HOST_KEY: &str = "LATTICE_HOST";
+// env var name
+const DEFAULT_LATTICE_HOST: &str = "127.0.0.1";
+// default mode is anonymous via loopback
 const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
 const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 600;
 const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
@@ -20,6 +31,13 @@ const TERM_BACKOFF_DELAY_MS: u64 = 50;
 
 use crate::bus::event_subject;
 use latticeclient::*;
+use nats::Message;
+
+#[derive(Debug, Clone)]
+pub(crate) enum ControlCommand {
+    TerminateActor(TerminateCommand),
+    StartActor(LaunchCommand, Message),
+}
 
 pub(crate) struct DistributedBus {
     nc: Arc<RwLock<Option<nats::Connection>>>,
@@ -27,7 +45,7 @@ pub(crate) struct DistributedBus {
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     req_timeout: Duration,
     host_id: String,
-    ns: Option<String>,
+    pub(crate) ns: Option<String>,
 }
 
 impl DistributedBus {
@@ -39,6 +57,8 @@ impl DistributedBus {
         labels: Arc<RwLock<HashMap<String, String>>>,
         terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
         ns: Option<String>,
+        cplane_s: Sender<ControlCommand>,
+        authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
     ) -> Self {
         let nc = Arc::new(RwLock::new(Some(get_connection())));
 
@@ -50,6 +70,20 @@ impl DistributedBus {
                 "default namespace"
             }
         );
+
+        spawn_controlplane_handler(
+            nc.clone(),
+            host_id.clone(),
+            claims.clone(),
+            bindings.clone(),
+            caps.clone(),
+            labels.clone(),
+            ns.clone(),
+            cplane_s,
+            authz,
+        )
+        .unwrap();
+
         spawn_inventory_handler(
             nc.clone(),
             host_id.to_string(),
@@ -72,6 +106,17 @@ impl DistributedBus {
     }
 
     pub fn disconnect(&self) {
+        // Terminate the control plane command handler
+        let cpsubject = format!(
+            "{}.{}.{}",
+            super::nsprefix(self.ns.as_ref().map(String::as_str)),
+            latticeclient::controlplane::CPLANE_PREFIX,
+            self.host_id
+        );
+        self.terminators.read().unwrap()[&cpsubject]
+            .send(true)
+            .unwrap();
+
         let mut backoffcount = 0_u8;
         // Wait until everything that can be gracefully shut off has been shut off
         while self.terminators.read().unwrap().len() > 0 && backoffcount < TERM_BACKOFF_MAX_TRIES {
@@ -131,7 +176,7 @@ impl DistributedBus {
             Err(e) => {
                 return Err(crate::errors::new(crate::errors::ErrorKind::Serialization(
                     format!("{}", e),
-                )))
+                )));
             }
         };
         let lock = self.nc.read().unwrap();
@@ -171,6 +216,214 @@ impl DistributedBus {
             calling_actor,
         )
     }
+}
+
+pub(crate) fn controlplane_wildcard_subject(ns: Option<&str>) -> String {
+    format!("{}.{}.>", super::nsprefix(ns), CPLANE_PREFIX) // e.g. wasmbus.control.* or wasmbus.control.Nxxx.*
+}
+
+pub(crate) fn spawn_controlplane(
+    host: &crate::Host,
+    com_r: Receiver<ControlCommand>,
+) -> Result<()> {
+    let wg = crossbeam_utils::sync::WaitGroup::new();
+    let claims = host.claims.clone();
+    let wasi: Option<WasiParams> = None;
+    let actor = true;
+    let binding: Option<String> = None;
+    let bus = host.bus.clone();
+    let mids = host.middlewares.clone();
+    let caps = host.caps.clone();
+    let bindings = host.bindings.clone();
+    let claimsmap = host.claims.clone();
+    let terminators = host.terminators.clone();
+    let hk = host.key.clone();
+    let auth = host.authorizer.clone();
+    let gantry = host.gantry_client.clone();
+
+    let subject = format!(
+        "{}.{}.{}",
+        super::nsprefix(bus.ns.as_ref().map(String::as_str)),
+        latticeclient::controlplane::CPLANE_PREFIX,
+        hk.public_key()
+    );
+    let (term_s, term_r): (Sender<bool>, Receiver<bool>) = channel::unbounded();
+    terminators
+        .write()
+        .unwrap()
+        .insert(subject.to_string(), term_s);
+
+    thread::spawn(move || loop {
+        select! {
+            recv(com_r) -> cmd => {
+                if let Ok(cmd) = cmd {
+                    match cmd {
+                        ControlCommand::StartActor(cmd, msg) => {
+                            // Acknowledge before downloading the bytes. Do not keep consumers waiting for
+                            // our own download process.
+                            if let Err(e) = msg.respond(&serde_json::to_vec(&LaunchAck {
+                                actor_id: cmd.actor_id.to_string(),
+                                host: hk.public_key()
+                            }).unwrap()) {
+                                error!("Failed to send schedule acknowledgement reply: {}", e);
+                            } else {
+                                info!("Acknowledged actor start request.");
+                            }
+                            match fetch_actor(&cmd.actor_id, gantry.clone(), cmd.revision) {
+                                Ok(a) => {
+                                    let wg = crossbeam_utils::sync::WaitGroup::new();
+                                    if crate::authz::enforce_validation(&a.token.jwt).is_err() {
+                                        error!("Attempt to remotely schedule invalid actor.");
+                                        continue;
+                                    }
+                                    if !auth.read().unwrap().can_load(&a.token.claims) {
+                                        error!("Authorization hook denied access to remotely scheduled module.");
+                                        continue;
+                                    }
+
+                                    crate::authz::register_claims(
+                                        claims.clone(),
+                                        &a.token.claims.subject,
+                                        a.token.claims.clone(),
+                                    );
+
+                                    let _ = crate::spawns::spawn_actor(wg, a.token.claims.clone(), a.bytes,
+                                        None, actor, binding.clone(), bus.clone(), mids.clone(),
+                                        caps.clone(), bindings.clone(), claimsmap.clone(), terminators.clone(),
+                                        hk.clone(), auth.clone());
+
+
+                                },
+                                Err(e) => {
+                                    error!("Actor download failed for {}: {}", &cmd.actor_id, e)
+                                }
+                            }
+                        },
+                        ControlCommand::TerminateActor(cmd) => {
+                            let actor_subject = bus.actor_subject(&cmd.actor_id);
+                            terminators.read().unwrap()
+                                [&actor_subject]
+                                .send(true)
+                                .unwrap();
+                        }
+                    }
+                }
+            }
+            recv(term_r) -> _term => {
+                terminators.write().unwrap().remove(&subject);
+                break;
+            }
+        }
+    });
+    Ok(())
+}
+
+fn fetch_actor(
+    actor_id: &str,
+    gantry: Arc<RwLock<Option<gantryclient::Client>>>,
+    revision: u32,
+) -> Result<crate::actor::Actor> {
+    let vec = actor_bytes_from_gantry(actor_id, gantry, revision)?;
+
+    crate::actor::Actor::from_slice(&vec)
+}
+
+pub(crate) fn actor_bytes_from_gantry(
+    actor_id: &str,
+    gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
+    revision: u32,
+) -> Result<Vec<u8>> {
+    {
+        let lock = gantry_client.read().unwrap();
+        if lock.as_ref().is_none() {
+            return Err(crate::errors::new(crate::errors::ErrorKind::MiscHost(
+                "No gantry client configured".to_string(),
+            )));
+        }
+    }
+    match gantry_client
+        .read()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .download_actor(actor_id, revision)
+    {
+        Ok(v) => Ok(v),
+        Err(e) => Err(crate::errors::new(crate::errors::ErrorKind::MiscHost(
+            format!("{}", e),
+        ))),
+    }
+}
+
+fn spawn_controlplane_handler(
+    nc: Arc<RwLock<Option<nats::Connection>>>,
+    host_id: String,
+    claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
+    bindings: Arc<RwLock<BindingsList>>,
+    caps: Arc<RwLock<HashMap<RouteKey, CapabilityDescriptor>>>,
+    labels: Arc<RwLock<HashMap<String, String>>>,
+    ns: Option<String>,
+    cplane_s: Sender<ControlCommand>,
+    authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
+) -> Result<()> {
+    let subject = controlplane_wildcard_subject(ns.as_ref().map(String::as_str));
+    let lbs = labels.clone();
+
+    let _ = nc
+        .read()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .subscribe(&subject)?
+        .with_handler(move |msg| {
+            if msg.subject.ends_with(LAUNCH_ACTOR) && msg.subject.contains(&host_id) {
+                // schedule the actor
+                let lc: LaunchCommand = serde_json::from_slice(&msg.data).unwrap();
+                cplane_s.send(ControlCommand::StartActor(lc, msg)).unwrap();
+            } else if msg.subject.ends_with(TERMINATE_ACTOR) && msg.subject.contains(&host_id) {
+                let tc: TerminateCommand = serde_json::from_slice(&msg.data).unwrap();
+                if !claims.read().unwrap().contains_key(&tc.actor_id) {
+                    warn!("Received request to terminate non-existent actor. Ignoring.");
+                } else {
+                    cplane_s.send(ControlCommand::TerminateActor(tc)).unwrap();
+                }
+            } else if msg.subject.ends_with(AUCTION_REQ) {
+                let req: LaunchAuctionRequest = serde_json::from_slice(&msg.data)?;
+                if claims.read().unwrap().contains_key(&req.actor_id) {
+                    trace!("Skipping auction response - actor already running locally.");
+                } else {
+                    // TODO: validate constraint requirements
+                    if !host_satifies_constraints(labels.clone(), &req.constraints) {
+                        trace!("Skipping auction response - host does not satisfy constraints.");
+                    } else {
+                        let ar = LaunchAuctionResponse {
+                            host_id: host_id.to_string(),
+                        };
+                        info!("Responding to actor schedule auction request");
+                        let _ = msg.respond(serde_json::to_vec(&ar).unwrap());
+                    }
+                }
+            }
+            Ok(())
+        });
+    Ok(())
+}
+
+fn host_satifies_constraints(
+    labels: Arc<RwLock<HashMap<String, String>>>,
+    constraints: &HashMap<String, String>,
+) -> bool {
+    for (label, val) in constraints.iter() {
+        match labels.read().unwrap().get_key_value(label) {
+            Some((k, v)) => {
+                if v != val {
+                    return false;
+                }
+            }
+            None => return false,
+        }
+    }
+    true
 }
 
 fn spawn_inventory_handler(

@@ -99,6 +99,9 @@ pub use middleware::prometheus;
 #[cfg(feature = "lattice")]
 use latticeclient::BusEvent;
 
+#[cfg(feature = "lattice")]
+use bus::lattice::ControlCommand;
+
 pub use authz::Authorizer;
 pub use middleware::Middleware;
 pub use wapc::{prelude::WasiParams, WapcHost};
@@ -106,7 +109,9 @@ pub use wapc::{prelude::WasiParams, WapcHost};
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use bus::{get_namespace_prefix, MessageBus};
-use crossbeam::Sender;
+use crossbeam::{Receiver, Sender};
+#[cfg(feature = "lattice")]
+use crossbeam_channel as channel;
 #[cfg(any(feature = "lattice", feature = "manifest"))]
 use inthost::RESTRICTED_LABELS;
 use plugins::PluginManager;
@@ -147,6 +152,8 @@ pub struct HostBuilder {
     labels: HashMap<String, String>,
     ns: Option<String>,
     authorizer: Box<dyn Authorizer + 'static>,
+    #[cfg(feature = "lattice")]
+    gantry_client: Option<gantryclient::Client>,
 }
 
 impl HostBuilder {
@@ -155,11 +162,22 @@ impl HostBuilder {
     /// labels, the namespace will be glaned from the `LATTICE_NAMESPACE` environment variable
     /// (if lattice mode is enabled), and the default authorizer will be set.
     pub fn new() -> HostBuilder {
-        HostBuilder {
+        #[cfg(not(feature = "lattice"))]
+        let b = HostBuilder {
             labels: inthost::detect_core_host_labels(),
             ns: get_namespace_prefix(),
             authorizer: Box::new(authz::DefaultAuthorizer::new()),
-        }
+        };
+
+        #[cfg(feature = "lattice")]
+        let b = HostBuilder {
+            labels: inthost::detect_core_host_labels(),
+            ns: get_namespace_prefix(),
+            authorizer: Box::new(authz::DefaultAuthorizer::new()),
+            gantry_client: None,
+        };
+
+        b
     }
 
     /// Sets the lattice namespace for this host. A lattice namespace is a unit of multi-tenant
@@ -193,9 +211,27 @@ impl HostBuilder {
         HostBuilder { labels: hm, ..self }
     }
 
+    /// Sets the gantry client to be used by the host.
+    #[cfg(feature = "lattice")]
+    pub fn with_gantryclient(self, client: gantryclient::Client) -> HostBuilder {
+        HostBuilder {
+            gantry_client: Some(client),
+            ..self
+        }
+    }
+
     /// Converts the transient builder instance into a realized host runtime instance
     pub fn build(self) -> Host {
-        Host::generate(self.authorizer, self.labels, self.ns.clone())
+        #[cfg(not(feature = "lattice"))]
+        let h = Host::generate(self.authorizer, self.labels, self.ns.clone());
+        #[cfg(feature = "lattice")]
+        let h = Host::generate(
+            self.authorizer,
+            self.labels,
+            self.ns.clone(),
+            self.gantry_client.clone(),
+        );
+        h
     }
 }
 
@@ -210,7 +246,7 @@ pub struct Host {
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
     // the key to this field is the subscription subject, and not either a pk or a capid
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
-    #[cfg(feature = "gantry")]
+    #[cfg(feature = "lattice")]
     gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
     key: KeyPair,
     authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
@@ -222,17 +258,27 @@ impl Host {
     /// Creates a new runtime host using all of the default values. Use the host builder
     /// if you want to provide more customization options
     pub fn new() -> Self {
-        Self::generate(
+        #[cfg(not(feature = "lattice"))]
+        let h = Self::generate(
             Box::new(authz::DefaultAuthorizer::new()),
             inthost::detect_core_host_labels(),
             get_namespace_prefix(),
-        )
+        );
+        #[cfg(feature = "lattice")]
+        let h = Self::generate(
+            Box::new(authz::DefaultAuthorizer::new()),
+            inthost::detect_core_host_labels(),
+            get_namespace_prefix(),
+            None,
+        );
+        h
     }
 
     pub(crate) fn generate(
         authz: Box<dyn Authorizer + 'static>,
         labels: HashMap<String, String>,
         ns: Option<String>,
+        #[cfg(feature = "lattice")] gantry: Option<gantryclient::Client>,
     ) -> Self {
         let key = KeyPair::new_server();
         let claims = Arc::new(RwLock::new(HashMap::new()));
@@ -240,6 +286,11 @@ impl Host {
         let bindings = Arc::new(RwLock::new(HashMap::new()));
         let labels = Arc::new(RwLock::new(labels));
         let terminators = Arc::new(RwLock::new(HashMap::new()));
+        let authz = Arc::new(RwLock::new(authz));
+
+        #[cfg(feature = "lattice")]
+        let (com_s, com_r): (Sender<ControlCommand>, Receiver<ControlCommand>) =
+            channel::unbounded();
 
         #[cfg(feature = "lattice")]
         let bus = Arc::new(bus::new(
@@ -250,6 +301,8 @@ impl Host {
             labels.clone(),
             terminators.clone(),
             ns.clone(),
+            com_s,
+            authz.clone(),
         ));
 
         #[cfg(not(feature = "lattice"))]
@@ -258,7 +311,7 @@ impl Host {
         #[cfg(feature = "lattice")]
         let _ = bus.publish_event(BusEvent::HostStarted(key.public_key()));
 
-        #[cfg(feature = "gantry")]
+        #[cfg(feature = "lattice")]
         let host = Host {
             terminators: terminators.clone(),
             bus: bus.clone(),
@@ -267,13 +320,13 @@ impl Host {
             bindings,
             caps,
             middlewares: Arc::new(RwLock::new(vec![])),
-            gantry_client: Arc::new(RwLock::new(None)),
+            gantry_client: Arc::new(RwLock::new(gantry)),
             key: key,
-            authorizer: Arc::new(RwLock::new(authz)),
+            authorizer: authz,
             labels,
             ns,
         };
-        #[cfg(not(feature = "gantry"))]
+        #[cfg(not(feature = "lattice"))]
         let host = Host {
             terminators: terminators.clone(),
             bus: bus.clone(),
@@ -283,13 +336,17 @@ impl Host {
             middlewares: Arc::new(RwLock::new(vec![])),
             caps,
             key: key,
-            authorizer: Arc::new(RwLock::new(authz)),
+            authorizer: authz,
             labels,
             ns,
         };
         info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
 
         host.ensure_extras().unwrap();
+
+        #[cfg(feature = "lattice")]
+        let _ = bus::lattice::spawn_controlplane(&host, com_r);
+
         host
     }
 
@@ -365,39 +422,13 @@ impl Host {
 
     /// Adds an actor to the host by looking it up in a Gantry repository, downloading
     /// the signed module bytes, and adding them to the host
-    #[cfg(feature = "gantry")]
-    pub fn add_actor_from_gantry(&self, actor: &str) -> Result<()> {
-        {
-            let lock = self.gantry_client.read().unwrap();
-            if lock.as_ref().is_none() {
-                return Err(errors::new(errors::ErrorKind::MiscHost(
-                    "No gantry client configured".to_string(),
-                )));
-            }
-        }
-        use crossbeam_channel::unbounded;
-        let (s, r) = unbounded();
-        let bytevec = Arc::new(RwLock::new(Vec::new()));
-        let b = bytevec.clone();
-        let _ack = self
-            .gantry_client
-            .read()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .download_actor(actor, move |chunk| {
-                bytevec
-                    .write()
-                    .unwrap()
-                    .extend_from_slice(&chunk.chunk_bytes);
-                if chunk.sequence_no == chunk.total_chunks {
-                    s.send(true).unwrap();
-                }
-                Ok(())
-            });
-        let _ = r.recv().unwrap();
-        let vec = b.read().unwrap();
-        self.add_actor(Actor::from_bytes(vec.clone())?)
+    #[cfg(feature = "lattice")]
+    pub fn add_actor_from_gantry(&self, actor: &str, revision: u32) -> Result<()> {
+        let vec =
+            bus::lattice::actor_bytes_from_gantry(actor, self.gantry_client.clone(), revision)?;
+
+        self.add_actor(Actor::from_slice(&vec)?)?;
+        Ok(())
     }
 
     /// Adds a portable capability provider (e.g. a WASI actor) to the waSCC host
@@ -599,15 +630,6 @@ impl Host {
         }
     }
 
-    /// Configure the Gantry client connection information to be used when actors
-    /// are loaded remotely via `Actor::from_gantry`
-    #[cfg(feature = "gantry")]
-    pub fn configure_gantry(&self, nats_urls: Vec<String>, jwt: &str, seed: &str) -> Result<()> {
-        *self.gantry_client.write().unwrap() =
-            Some(gantryclient::Client::new(nats_urls, jwt, seed));
-        Ok(())
-    }
-
     /// Invoke an operation handler on an actor directly. The caller is responsible for
     /// knowing ahead of time if the given actor supports the specified operation.
     pub fn call_actor(&self, actor: &str, operation: &str, msg: &[u8]) -> Result<Vec<u8>> {
@@ -648,10 +670,10 @@ impl Host {
             }
         }
         for actor in manifest.actors {
-            #[cfg(feature = "gantry")]
+            #[cfg(feature = "lattice")]
             self.add_actor_gantry_first(&actor)?;
 
-            #[cfg(not(feature = "gantry"))]
+            #[cfg(not(feature = "lattice"))]
             self.add_actor(Actor::from_file(&actor)?)?;
         }
         for cap in manifest.capabilities {
@@ -669,11 +691,11 @@ impl Host {
         Ok(())
     }
 
-    #[cfg(feature = "gantry")]
+    #[cfg(feature = "lattice")]
     fn add_actor_gantry_first(&self, actor: &str) -> Result<()> {
         if actor.len() == 56 && actor.starts_with('M') {
             // This is an actor's public subject
-            self.add_actor_from_gantry(actor)
+            self.add_actor_from_gantry(actor, 0) // TODO: do not default to the latest revision when using manifest file
         } else {
             self.add_actor(Actor::from_file(&actor)?)
         }

@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 _The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)_
 
-## [0.12.0] - ?? AUG ??
+## [0.13.0] - 2020 SEP 30
+
+This version corresponds to the project milestone [0.13](https://github.com/wascc/wascc-host/milestone/2)
+
+### Added
+
+* _Lattice Control Plane Protocol_ - A new protocol is now supported on the lattice to allow for "auctions" to take place to gather a list of hosts willing to launch a given actor. An auction request is sent out with a set of constraints, any host that can satisfy those contraints responds affirmatively to the auction, and then the conductor of the auction chooses from among the responding hosts and sends a command to that specific host telling it to launch the actor in question. Launching that actor is then done by downloading the actor's bytes from a [Gantry](https://github.com/wascc/gantry) server and running it. You can specify a set of key/value pairs that define constraints that are matched against host labels to definite affinity-style scheduling rules.
+* _Sim Gantry_ - The gantry repo now has a "sim gantry" binary that developers can use to instantly start a Gantry host atop an arbitrary directory that contains signed actor modules.
+
+### Changed
+
+* You can no longer invoke `configure_gantry` on a running host. The gantry client can only be supplied by the host builder now, further improving the runtime security and reliability of the host.
+* The `gantry` feature has been merged with the `lattice` feature. Gantry (client) support is no longer an isolated opt-in feature because both require the NATS connection in order to function and it didn't make sense to communicate with Gantry while not having the ability to connect to a lattice.
+* Renamed `from_bytes` on the `Actor` struct to `from_slice`, and it now takes a `&[u8]` parameter instead of an owned vector.
+* Loading an actor from gantry via the host API call now requires a revision number (0 indicates pull the latest)
+* The Gantry client API to download an actor no longer requires a callback, it simply returns a vector of bytes.
+
+### Removed
+
+Nothing
+
+## [0.12.0] - 2020 AUG 30
 
 This version corresponds to the project milestone 0.12
 
