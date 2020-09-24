@@ -16,14 +16,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None,
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MDNPIQOU5EEHTP4TKY2APFOJTTEYYARN3ZIJTRWRYWHX6B4MFSO6ZCRT",
         "wascc:wasidemo",
         None,
         HashMap::new(),
     )?;
 
-    host.bind_actor(
+    host.set_binding(
         "MDNPIQOU5EEHTP4TKY2APFOJTTEYYARN3ZIJTRWRYWHX6B4MFSO6ZCRT",
         "wascc:http_server",
         None,

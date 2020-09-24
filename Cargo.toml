@@ -32,7 +32,9 @@ crossbeam-utils = "^0.7.0"
 prometheus = { version = "0.9", features = ["push"], optional = true }
 hyper = { version = "0.13", optional = true }
 tokio = { version = "0.2", features = ["macros"], optional = true }
-wapc = "0.9"
+wapc = { version = "0.10.0" }
+
+
 wascc-codec = "0.8"
 wascap = "0.5.0"
 log = "0.4.11"
@@ -47,25 +49,30 @@ gantryclient = { version = "0.0.9", optional = true }
 nats = { version = "0.7.3", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.13", optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = { version = "1.0.57", optional = true }
 envmnt = { version = "0.8.4", optional = true }
 structopt = { version = "0.3.17", optional = true }
-latticeclient = { version = "0.3.0" , optional = true}
+latticeclient = { path = "../lattice-client", version="0.3.1" , optional = true}
 ctrlc = { version = "3.1.6", features = ["termination"], optional = true}
+wasm3-provider = { version = "0.0.1", optional = true}
+wasmtime-provider = { version = "0.0.1" , optional = true}
 
 [dev-dependencies]
 reqwest = { version = "0.10", features = ["blocking"] }
 mockito = "0.27"
 redis = "0.17.0"
 nats = "0.7.3"
+serde_json = "1.0.57"
 
 
 [features]
-default = []
+default = ["wasmtime"]
 manifest = ["serde", "serde_yaml", "serde_json", "envmnt"]
 bin = ["structopt", "ctrlc"]
 prometheus_middleware = ["prometheus", "hyper", "tokio"]
 lattice = ["nats", "serde", "latticeclient", "serde_json", "gantryclient"]
+wasmtime = ["wasmtime-provider"]
+wasm3 = ["wasm3-provider"]
 
 [[example]]
 name = "kvcounter_manifest"

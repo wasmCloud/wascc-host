@@ -16,7 +16,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use uuid::Uuid;
-use wapc::prelude::*;
+use wapc::WapcHost;
 use wascap::{jwt::Claims, prelude::KeyPair};
 use wascc_codec::{
     capabilities::{CapabilityDescriptor, OP_GET_CAPABILITY_DESCRIPTOR},
@@ -132,7 +132,7 @@ fn gen_liveupdate_invocation(hostkey: &KeyPair, target: &str, bytes: Vec<u8>) ->
     )
 }
 
-/// Removes all bindings for a given actor by sending the "deconfigure" message
+/// Removes all bindings for a given actor by sending the "remove actor" message
 /// to each of the capabilities
 pub(crate) fn deconfigure_actor(
     hostkey: KeyPair,
@@ -140,6 +140,17 @@ pub(crate) fn deconfigure_actor(
     bindings: Arc<RwLock<BindingsList>>,
     key: &str,
 ) {
+    #[cfg(feature = "lattice")]
+    {
+        // Don't remove the bindings for this actor unless it's the last instance in the lattice
+        if let Ok(i) = bus.instance_count(key) {
+            if i > 0 {
+                // This is 0 because the actor being removed has already been taken out of the claims map, so bus queries will not see the local instance
+                info!("Actor instance terminated at scale > 1, bypassing binding removal.");
+                return;
+            }
+        }
+    }
     let cfg = CapabilityConfiguration {
         module: key.to_string(),
         values: HashMap::new(),
@@ -157,7 +168,7 @@ pub(crate) fn deconfigure_actor(
     for (actor, capid, binding) in nbindings {
         info!("Unbinding actor {} from {},{}", actor, binding, capid);
         let _inv_r = bus.invoke(
-            &bus.provider_subject_bound_actor(&capid, &binding, &actor),
+            &bus.provider_subject(&capid, &binding), // The OP_REMOVE_ACTOR invocation should go to _all_ instances of the provider being unbound
             gen_remove_actor(&hostkey, buf.clone(), &binding, &capid),
         );
         remove_binding(bindings.clone(), key, &binding, &capid);
@@ -199,6 +210,7 @@ pub(crate) fn gen_remove_actor(
         msg,
     )
 }
+
 /// An immutable representation of an invocation within waSCC
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "lattice", derive(serde::Serialize, serde::Deserialize))]

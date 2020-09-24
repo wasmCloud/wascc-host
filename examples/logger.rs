@@ -14,7 +14,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None,
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MDW7BWQDVYBRC6WKSJRRZL27R73EVBWQINYLPFDRCWDZDFQO4JMO4U6J",
         "wascc:http_server",
         None,
@@ -25,7 +25,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // provider _at all_ unless an explicit bind takes place, even if there is
     // no configuration data. This is because bindings in 0.9.0 can be global
     // entities, spanning clouds, data centers, and devices.
-    host.bind_actor(
+    host.set_binding(
         "MDW7BWQDVYBRC6WKSJRRZL27R73EVBWQINYLPFDRCWDZDFQO4JMO4U6J",
         "wascc:logging",
         None,

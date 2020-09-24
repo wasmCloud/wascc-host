@@ -14,14 +14,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None,
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:http_server",
         None,
         generate_port_config(8081),
     )?;
 
-    host.bind_actor(
+    host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:keyvalue",
         None,

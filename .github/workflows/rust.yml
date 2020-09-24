@@ -21,6 +21,9 @@ jobs:
   test:
     name: Test feature matrix
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        engine: ["wasm3", "wasmtime"]
 
     services:
       nats:
@@ -36,13 +39,15 @@ jobs:
           - 6379:6379
 
     steps:
-      - uses: actions/checkout@v2       
+      - uses: actions/checkout@v2
+      - name: Run tests (featureless)
+        run: cargo test --features "${{ matrix.engine }}"
       - name: Run tests (Everything but Lattice)
-        run: cargo test --verbose --features "manifest bin prometheus_middleware"      
+        run: cargo test --features "manifest bin prometheus_middleware ${{ matrix.engine }}"
       - name: Run tests (manifest only)
-        run: cargo test --verbose --features "manifest"            
+        run: cargo test --features "manifest ${{ matrix.engine }}"
       - name: Run tests (lattice mode)
-        run: cargo test --features "lattice bin manifest" --test integration -- --test-threads=1
+        run: cargo test --features "lattice bin manifest ${{ matrix.engine }}" --test integration -- --test-threads=1
         env:
           LATTICE_HOST: 0.0.0.0
           LATTICE_RPC_TIMEOUT_MILLIS: 100

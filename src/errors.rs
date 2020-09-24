@@ -117,6 +117,12 @@ impl From<Box<dyn StdError + Send + Sync>> for Error {
     }
 }
 
+impl From<String> for Error {
+    fn from(source: String) -> Error {
+        Error(Box::new(ErrorKind::MiscHost(source)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[allow(dead_code)]

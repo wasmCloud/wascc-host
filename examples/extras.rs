@@ -10,7 +10,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None,
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MDOYAT2KHJ6N5DAY5X7JKGIBMKABTPXRX2KHUJI6APOVNKQDMRTIUSY2",
         "wascc:http_server",
         None,

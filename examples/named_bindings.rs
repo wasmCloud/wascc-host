@@ -30,21 +30,21 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Some("source2".to_string()),
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         ACTOR_SUBJECT,
         "wascc:http_server",
         None,
         generate_port_config(8081),
     )?;
 
-    host.bind_actor(
+    host.set_binding(
         ACTOR_SUBJECT,
         "wascc:keyvalue",
         Some("source1".to_string()),
         redis_config(0),
     )?;
 
-    host.bind_actor(
+    host.set_binding(
         ACTOR_SUBJECT,
         "wascc:keyvalue",
         Some("source2".to_string()),

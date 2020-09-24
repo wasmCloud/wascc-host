@@ -1,4 +1,3 @@
-use super::nsprefix;
 use crate::errors;
 use crate::{Invocation, InvocationResponse, Result};
 use crossbeam::{Receiver, Sender};
@@ -31,6 +30,15 @@ impl InprocBus {
             .unwrap()
             .insert(subject.to_string(), (sender, receiver));
         Ok(())
+    }
+
+    pub fn nqsubscribe(
+        &self,
+        subject: &str,
+        sender: crossbeam::Sender<Invocation>,
+        receiver: crossbeam::Receiver<InvocationResponse>,
+    ) -> Result<()> {
+        self.subscribe(subject, sender, receiver)
     }
 
     pub fn invoke(&self, subject: &str, inv: Invocation) -> Result<InvocationResponse> {

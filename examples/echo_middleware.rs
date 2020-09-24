@@ -20,13 +20,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     host.add_middleware(CachingMiddleware::default());
     host.add_middleware(LoggingMiddleware::default());
 
-    host.bind_actor(
+    host.set_binding(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
         None,
         generate_port_config(8081),
     )?;
-    host.bind_actor(
+    host.set_binding(
         "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
         "wascc:http_server",
         None,
