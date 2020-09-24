@@ -122,31 +122,10 @@ pub(crate) fn spawn_actor(
             });
             info!("Actor {} up and running.", &claims.subject);
         }
-        /*let mids = m.clone();
-        let binding = bi.clone();
-        let bus = b.clone();
-        let c = claims.clone();
-        let d = d.clone();*/
         loop {
-            //let bus = b.clone();
             select! {
                 recv(inv_r) -> inv => {
                     if let Ok(inv) = inv {
-                        /*if inv.operation == OP_PERFORM_LIVE_UPDATE && actor { // Preempt the middleware chain if the operation is a live update
-                            #[cfg(feature = "lattice")]
-                            let _ = b.publish_event(BusEvent::ActorUpdating { actor: c.subject.to_string(), host: hostkey.public_key()});
-                            let r = live_update(&mut guest, &inv);
-                            #[cfg(feature = "lattice")]
-                            {
-                                let succeeded = r.error.is_none();
-                                let _ = b.publish_event(BusEvent::ActorUpdateComplete {
-                                    actor: c.subject.to_string(),
-                                    host: hostkey.public_key(),
-                                    success: succeeded});
-                            }
-                            resp_s.send(r).unwrap();
-                            continue;
-                        }*/
                         let inv_r = if actor {
                             middleware::invoke_actor(mids.clone(), inv.clone(), &mut guest).unwrap()
                         } else {
