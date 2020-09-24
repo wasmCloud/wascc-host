@@ -10,7 +10,7 @@ pub(crate) fn lattice_single_host() -> Result<(), Box<dyn Error>> {
         .with_label("hostcore.arch", "FOOBAR")
         .with_lattice_namespace("singlehost")
         .build();
-    
+
     let delay = Duration::from_millis(500);
     std::thread::sleep(delay);
 
