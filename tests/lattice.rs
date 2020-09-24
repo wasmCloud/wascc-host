@@ -33,11 +33,11 @@ pub(crate) fn lattice_isolation() -> Result<(), Box<dyn Error>> {
     use std::time::Duration;
     use wascc_host::{Host, HostBuilder};
     let host1 = HostBuilder::new()
-        .with_lattice_namespace("system.1")
+        .with_lattice_namespace("system1")
         .with_label("testval", "1")
         .build();
     let host2 = HostBuilder::new()
-        .with_lattice_namespace("system.2")
+        .with_lattice_namespace("system2")
         .with_label("testval", "2")
         .build();
 
