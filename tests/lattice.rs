@@ -44,17 +44,17 @@ pub(crate) fn lattice_isolation() -> Result<(), Box<dyn Error>> {
     let delay = Duration::from_millis(500);
     std::thread::sleep(delay);
 
-    let lc1 = Client::new("127.0.0.1", None, delay, Some("system.1".to_string()));
+    let lc1 = Client::new("127.0.0.1", None, delay, Some("system1".to_string()));
     let hosts1 = lc1.get_hosts()?;
     assert_eq!(hosts1.len(), 1);
     assert_eq!(hosts1[0].labels["testval"], "1");
 
-    let lc2 = Client::new("127.0.0.1", None, delay, Some("system.2".to_string()));
+    let lc2 = Client::new("127.0.0.1", None, delay, Some("system2".to_string()));
     let hosts2 = lc2.get_hosts()?;
     assert_eq!(hosts2.len(), 1);
     assert_eq!(hosts2[0].labels["testval"], "2");
 
-    let lc3 = Client::new("127.0.0.1", None, delay, Some("system.nope".to_string()));
+    let lc3 = Client::new("127.0.0.1", None, delay, Some("systemnope".to_string()));
     let hosts3 = lc3.get_hosts()?;
     assert_eq!(hosts3.len(), 0);
 
