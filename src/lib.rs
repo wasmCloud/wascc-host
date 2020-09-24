@@ -186,8 +186,11 @@ impl HostBuilder {
     /// lattice namespace should not include any non-alphanumeric characters.
     #[cfg(feature = "lattice")]
     pub fn with_lattice_namespace(self, ns: &str) -> HostBuilder {
+        if !ns.name.chars().all(char::is_alphanumeric) {
+            panic!("Cannot use a non-alphanumeric lattice namespace name");
+        }
         HostBuilder {
-            ns: Some(ns.to_string()),
+            ns: Some(ns.to_lowercase().to_string()),
             ..self
         }
     }
