@@ -43,7 +43,7 @@ jobs:
       - name: Run tests (featureless)
         run: cargo test --features "${{ matrix.engine }}" -- --test-threads=1
       - name: Run tests (Everything but Lattice)
-        run: cargo test --features "manifest bin prometheus_middleware ${{ matrix.engine }}" -- --test-threads=1
+        run: cargo test --features "manifest bin ${{ matrix.engine }}" -- --test-threads=1
       - name: Run tests (manifest only)
         run: cargo test --features "manifest ${{ matrix.engine }}" -- --test-threads=1
       - name: Run tests (lattice mode)
