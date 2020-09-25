@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::{collections::HashMap, error::Error};
 use wascc_host::{Actor, Host, NativeCapability};
 
@@ -18,14 +19,14 @@ pub fn gen_stock_host(first_port: u16) -> Result<Host, Box<dyn Error>> {
         Some("stockhost".to_string()),
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
         "wascc:http_server",
         Some("stockhost".to_string()),
         generate_port_config(first_port),
     )?;
 
-    host.bind_actor(
+    host.set_binding(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
         Some("stockhost".to_string()),
@@ -46,13 +47,13 @@ pub fn gen_kvcounter_host(port: u16, host: Host) -> Result<Host, Box<dyn Error>>
         None,
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:keyvalue",
         None,
         redis_config(),
     )?;
-    host.bind_actor(
+    host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:http_server",
         None,
@@ -78,4 +79,25 @@ pub fn generate_port_config(port: u16) -> HashMap<String, String> {
     hm.insert("PORT".to_string(), port.to_string());
 
     hm
+}
+
+pub fn generate_resigned_actor(bytes: &[u8]) -> Result<Actor, Box<dyn Error>> {
+    use wascap::prelude::*;
+
+    let (issuer, module) = (KeyPair::new_account(), KeyPair::new_module());
+    let claims = ClaimsBuilder::<Actor>::new()
+        .issuer(&issuer.public_key())
+        .subject(&module.public_key())
+        .with_metadata(Actor {
+            name: Some("test".to_string()),
+            caps: Some(vec![
+                caps::HTTP_SERVER.to_string(),
+                caps::KEY_VALUE.to_string(),
+            ]),
+            ..Default::default()
+        })
+        .build();
+    let embedded = wasm::embed_claims(&bytes, &claims, &issuer)?;
+
+    Ok(wascc_host::Actor::from_slice(&embedded)?)
 }

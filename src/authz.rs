@@ -124,7 +124,10 @@ pub(crate) fn register_claims(
 }
 
 pub(crate) fn unregister_claims(claims_map: ClaimsMap, subject: &str) {
-    claims_map.write().unwrap().remove(subject);
+    {
+        let mut lock = claims_map.write().unwrap();
+        let _ = lock.remove(subject);
+    }
 }
 
 impl Host {

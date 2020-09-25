@@ -16,20 +16,20 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None,
     )?)?;
 
-    host.bind_actor(
+    host.set_binding(
         "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
         "wascc:http_server",
         None,
         generate_port_config(8082),
     )?;
 
-    host.bind_actor(
+    host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:keyvalue",
         None,
         redis_config(),
     )?;
-    host.bind_actor(
+    host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:http_server",
         None,

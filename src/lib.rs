@@ -23,14 +23,14 @@
 //!        "./examples/.assets/libwascc_httpsrv.so", None
 //!    )?)?;
 //!
-//!    host.bind_actor(
+//!    host.set_binding(
 //!        "MDFD7XZ5KBOPLPHQKHJEMPR54XIW6RAG5D7NNKN22NP7NSEWNTJZP7JN",
 //!        "wascc:http_server",
 //!        None,
 //!        generate_port_config(8085),
 //!    )?;
 //!
-//!    host.bind_actor(
+//!    host.set_binding(
 //!        "MB4OLDIC3TCZ4Q4TGGOVAZC43VXFE2JQVRAXQMQFXUCREOOFEKOKZTY2",
 //!        "wascc:http_server",
 //!        None,
@@ -104,14 +104,15 @@ use bus::lattice::ControlCommand;
 
 pub use authz::Authorizer;
 pub use middleware::Middleware;
-pub use wapc::{prelude::WasiParams, WapcHost};
+pub use wapc::WasiParams;
 
 pub type SubjectClaimsPair = (String, Claims<wascap::jwt::Actor>);
 
 use bus::{get_namespace_prefix, MessageBus};
-use crossbeam::{Receiver, Sender};
+use crossbeam::Sender;
 #[cfg(feature = "lattice")]
 use crossbeam_channel as channel;
+use crossbeam_channel::Receiver;
 #[cfg(any(feature = "lattice", feature = "manifest"))]
 use inthost::RESTRICTED_LABELS;
 use plugins::PluginManager;
@@ -124,7 +125,7 @@ use wascap::prelude::KeyPair;
 use wascc_codec::{
     capabilities::CapabilityDescriptor,
     core::{CapabilityConfiguration, OP_BIND_ACTOR},
-    SYSTEM_ACTOR,
+    serialize, SYSTEM_ACTOR,
 };
 
 type BindingsList = HashMap<BindingTuple, CapabilityConfiguration>;
@@ -159,7 +160,7 @@ pub struct HostBuilder {
 impl HostBuilder {
     /// Creates a new host builder. This builder will initialize itself with some defaults
     /// obtained from the environment. The labels list will pre-populate with the `hostcore.*`
-    /// labels, the namespace will be glaned from the `LATTICE_NAMESPACE` environment variable
+    /// labels, the namespace will be gleaned from the `LATTICE_NAMESPACE` environment variable
     /// (if lattice mode is enabled), and the default authorizer will be set.
     pub fn new() -> HostBuilder {
         #[cfg(not(feature = "lattice"))]
@@ -181,11 +182,15 @@ impl HostBuilder {
     }
 
     /// Sets the lattice namespace for this host. A lattice namespace is a unit of multi-tenant
-    /// isolation on a network
+    /// isolation on a network. To reduce the risk of conflicts or subscription failures, the
+    /// lattice namespace should not include any non-alphanumeric characters.
     #[cfg(feature = "lattice")]
     pub fn with_lattice_namespace(self, ns: &str) -> HostBuilder {
+        if !ns.chars().all(char::is_alphanumeric) {
+            panic!("Cannot use a non-alphanumeric lattice namespace name");
+        }
         HostBuilder {
-            ns: Some(ns.to_string()),
+            ns: Some(ns.to_lowercase().to_string()),
             ..self
         }
     }
@@ -202,7 +207,8 @@ impl HostBuilder {
     }
 
     /// Adds an arbitrary label->value pair of metadata to the host. Cannot override
-    /// reserved labels such as those that begin with `hostcore.`
+    /// reserved labels such as those that begin with `hostcore.` Calling this twice
+    /// on the same label will have no effect after the first call.
     pub fn with_label(self, key: &str, value: &str) -> HostBuilder {
         let mut hm = self.labels.clone();
         if !hm.contains_key(key) {
@@ -235,7 +241,7 @@ impl HostBuilder {
     }
 }
 
-/// Represents an instance of a waSCC host
+/// Represents an instance of a waSCC host runtime
 #[derive(Clone)]
 pub struct Host {
     bus: Arc<MessageBus>,
@@ -315,7 +321,7 @@ impl Host {
         let host = Host {
             terminators: terminators.clone(),
             bus: bus.clone(),
-            claims,
+            claims: claims.clone(),
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             bindings,
             caps,
@@ -330,7 +336,7 @@ impl Host {
         let host = Host {
             terminators: terminators.clone(),
             bus: bus.clone(),
-            claims,
+            claims: claims.clone(),
             plugins: Arc::new(RwLock::new(PluginManager::default())),
             bindings,
             middlewares: Arc::new(RwLock::new(vec![])),
@@ -350,18 +356,9 @@ impl Host {
         host
     }
 
-    /// Sets an arbitrary label on the host. Discoverable via lattice query
-    #[cfg(feature = "lattice")]
-    pub fn set_label(&self, label: &str, value: &str) {
-        if !RESTRICTED_LABELS.contains(&label) {
-            self.labels
-                .write()
-                .unwrap()
-                .insert(label.to_string(), value.to_string());
-        }
-    }
-
-    /// Adds an actor to the host
+    /// Adds an actor to the host. This will provision resources (such as a handler thread) for the actor. Actors
+    /// will not be able to make use of capability providers unless bindings are added (or existed prior to the actor
+    /// being added to a host, which is possible in `lattice` mode)
     pub fn add_actor(&self, actor: Actor) -> Result<()> {
         if self
             .claims
@@ -381,9 +378,10 @@ impl Host {
             )));
         }
 
-        authz::register_claims(
-            self.claims.clone(),
-            &actor.token.claims.subject,
+        let c = self.claims.clone();
+
+        c.write().unwrap().insert(
+            actor.token.claims.subject.to_string(),
             actor.token.claims.clone(),
         );
 
@@ -400,7 +398,7 @@ impl Host {
             self.middlewares.clone(),
             self.caps.clone(),
             self.bindings.clone(),
-            self.claims.clone(),
+            c.clone(),
             self.terminators.clone(),
             self.key.clone(),
             self.authorizer.clone(),
@@ -409,7 +407,7 @@ impl Host {
         if actor.capabilities().contains(&extras::CAPABILITY_ID.into()) {
             // force a binding so that there's a private actor subject on the bus for the
             // actor to communicate with the extras provider
-            self.bind_actor(
+            self.set_binding(
                 &actor.public_key(),
                 extras::CAPABILITY_ID,
                 None,
@@ -421,9 +419,17 @@ impl Host {
     }
 
     /// Adds an actor to the host by looking it up in a Gantry repository, downloading
-    /// the signed module bytes, and adding them to the host
+    /// the signed module bytes, and adding them to the host. The connection to a Gantry repository
+    /// will be facilitated by the Gantry client supplied by a `HostBuilder`. By default, hosts
+    /// do not come configured with Gantry clients, so you will have to configure one to use this function
     #[cfg(feature = "lattice")]
     pub fn add_actor_from_gantry(&self, actor: &str, revision: u32) -> Result<()> {
+        if self.gantry_client.read().unwrap().is_none() {
+            return Err(errors::new(errors::ErrorKind::MiscHost(
+                "No gantry client configured for this host".to_string(),
+            )));
+        }
+
         let vec =
             bus::lattice::actor_bytes_from_gantry(actor, self.gantry_client.clone(), revision)?;
 
@@ -431,7 +437,10 @@ impl Host {
         Ok(())
     }
 
-    /// Adds a portable capability provider (e.g. a WASI actor) to the waSCC host
+    /// Adds a portable capability provider (e.g. a WASI actor) to the waSCC host. Portable capability providers adhere
+    /// to the same contract as native capability providers, but they are implemented as "high-privilege WASM" modules
+    /// via WASI. Today, there is very little a WASI-based capability provider can do, but in the near future when
+    /// WASI gets a standardized networking stack, more providers can be written as portable modules.
     pub fn add_capability(
         &self,
         actor: Actor,
@@ -464,6 +473,8 @@ impl Host {
 
     /// Removes an actor from the host. Notifies the actor's processing thread to terminate,
     /// which will in turn attempt to unbind that actor from all previously bound capability providers
+    /// (in lattice mode, this unbinding only takes place if the actor is the last instance of its
+    /// kind in the lattice)
     pub fn remove_actor(&self, pk: &str) -> Result<()> {
         self.terminators.read().unwrap()
             [&bus::actor_subject(self.ns.as_ref().map(String::as_str), pk)]
@@ -475,7 +486,8 @@ impl Host {
     /// Replaces one running actor with another live actor with no message loss. Note that
     /// the time it takes to perform this replacement can cause pending messages from capability
     /// providers (e.g. messages from subscriptions or HTTP requests) to build up in a backlog,
-    /// so make sure the new actor can handle this stream of these delayed messages
+    /// so make sure the new actor can handle this stream of these delayed messages. Also ensure that
+    /// the underlying WebAssembly driver (chosen via feature flag) supports hot-swapping module bytes.
     pub fn replace_actor(&self, new_actor: Actor) -> Result<()> {
         crate::inthost::replace_actor(&self.key, self.bus.clone(), new_actor)
     }
@@ -485,7 +497,10 @@ impl Host {
         self.middlewares.write().unwrap().push(Box::new(mid));
     }
 
-    /// Adds a native capability provider plugin to the waSCC runtime. Note that because these capabilities are native,
+    /// Adds a native capability provider plugin to the host runtime. If running in lattice mode,
+    /// and at least one other instance of this same capability provider is running with previous
+    /// bindings, then the provider being added to this host will automatically reconstitute
+    /// the binding configuration. Note that because these capabilities are native,
     /// cross-platform support is not always guaranteed.
     pub fn add_native_capability(&self, capability: NativeCapability) -> Result<()> {
         let capid = capability.id();
@@ -537,17 +552,52 @@ impl Host {
         }
     }
 
+    /// Removes a binding between an actor and the indicated capability provider. In lattice mode,
+    /// this operation has a _lattice global_ scope, and so all running instances of the indicated
+    /// capability provider will be asked to dispose of any resources provisioned for the given
+    /// actor.
+    pub fn remove_binding(
+        &self,
+        actor: &str,
+        capid: &str,
+        binding_name: Option<String>,
+    ) -> Result<()> {
+        let cfg = CapabilityConfiguration {
+            module: actor.to_string(),
+            values: HashMap::new(),
+        };
+        let buf = serialize(&cfg).unwrap();
+        let binding = binding_name.unwrap_or("default".to_string());
+        let inv_r = self.bus.invoke(
+            &self.bus.provider_subject(&capid, &binding), // The OP_REMOVE_ACTOR invocation should go to _all_ instances of the provider being unbound
+            crate::inthost::gen_remove_actor(&self.key, buf.clone(), &binding, &capid),
+        )?;
+        if let Some(s) = inv_r.error {
+            Err(format!("Failed to remove binding: {}", s).into())
+        } else {
+            Ok(())
+        }
+    }
+
     /// Binds an actor to a capability provider with a given configuration. If the binding name
-    /// is `None` then the default binding name will be used. An actor can only have one default
-    /// binding per capability provider.
-    pub fn bind_actor(
+    /// is `None` then the default binding name will be used (`default`). An actor can only have one named
+    /// binding per capability provider. In lattice mode, the call to this function has a _lattice global_
+    /// scope, and so all running instances of the indicated provider will be notified and provision
+    /// resources accordingly. For example, if you create a binding between an actor and an HTTP server
+    /// provider, and there are four instances of that provider running in the lattice, each of those
+    /// four hosts will start an HTTP server on the indicated port.
+    pub fn set_binding(
         &self,
         actor: &str,
         capid: &str,
         binding_name: Option<String>,
         config: HashMap<String, String>,
     ) -> Result<()> {
+        #[cfg(feature = "lattice")]
+        let claims = self.bus.discover_claims(actor);
+        #[cfg(not(feature = "lattice"))]
         let claims = self.claims.read().unwrap().get(actor).cloned();
+
         if claims.is_none() {
             return Err(errors::new(errors::ErrorKind::MiscHost(
                 "Attempted to bind non-existent actor".to_string(),
@@ -631,7 +681,10 @@ impl Host {
     }
 
     /// Invoke an operation handler on an actor directly. The caller is responsible for
-    /// knowing ahead of time if the given actor supports the specified operation.
+    /// knowing ahead of time if the given actor supports the specified operation. In lattice
+    /// mode, this call will still only attempt a _local_ invocation on the host and will not
+    /// make a lattice-wide call. If you want to make lattice-wide invocations, please use
+    /// the lattice client library.
     pub fn call_actor(&self, actor: &str, operation: &str, msg: &[u8]) -> Result<Vec<u8>> {
         if !self.claims.read().unwrap().contains_key(actor) {
             return Err(errors::new(errors::ErrorKind::MiscHost(
@@ -652,9 +705,12 @@ impl Host {
         }
     }
 
-    /// Returns the full set of JWT claims for a given actor, if that actor is running in the host
+    /// Returns the full set of JWT claims for a given actor, if that actor is running in the host. This
+    /// call will not query other hosts in the lattice if lattice mode is enabled.
     pub fn claims_for_actor(&self, pk: &str) -> Option<Claims<wascap::jwt::Actor>> {
-        self.claims.read().unwrap().get(pk).cloned()
+        let c = self.claims.read().unwrap().get(pk).cloned();
+
+        c
     }
 
     /// Applies a manifest JSON or YAML file to set up a host's actors, capability providers,
@@ -681,7 +737,7 @@ impl Host {
             self.add_native_capability(NativeCapability::from_file(cap.path, cap.binding_name)?)?;
         }
         for config in manifest.bindings {
-            self.bind_actor(
+            self.set_binding(
                 &config.actor,
                 &config.capability,
                 config.binding,
@@ -701,7 +757,8 @@ impl Host {
         }
     }
 
-    /// Returns the list of actors registered in the host
+    /// Returns the list of actors registered in the host. Even if lattice mode is enabled, this function
+    /// will only return the list of actors in this specific host
     pub fn actors(&self) -> Vec<SubjectClaimsPair> {
         authz::get_all_claims(self.claims.clone())
     }
@@ -720,7 +777,7 @@ impl Host {
     }
 
     /// Returns the list of actors in the host that contain all of the tags in the
-    /// supplied parameter
+    /// supplied parameter. This function will not make a lattice-wide tag query
     pub fn actors_by_tag(&self, tags: &[&str]) -> Vec<String> {
         let mut actors = vec![];
 
@@ -739,9 +796,12 @@ impl Host {
     /// the host and then removing all capability providers. This function is not guaranteed to
     /// block and wait for the shutdown to finish
     pub fn shutdown(&self) -> Result<()> {
-        let actors = self.actors();
-        for (pk, _claims) in actors {
-            self.remove_actor(&pk)?;
+        {
+            let lock = self.claims.read().unwrap();
+            let actors: Vec<_> = lock.values().collect();
+            for claims in actors {
+                self.remove_actor(&claims.subject)?;
+            }
         }
         let caps = self.capabilities();
         for (binding_name, capid) in caps.keys() {

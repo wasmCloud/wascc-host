@@ -3,7 +3,14 @@ use wascc_host::{Actor, Authorizer, Host, HostBuilder, NativeCapability};
 
 pub(crate) fn default_authorizer_enforces_cap_attestations() -> Result<(), Box<dyn Error>> {
     // Attempt to bind an actor to a capability for which it isn't authorized.
-    let host = Host::new();
+    #[cfg(feature = "lattice")]
+    let host = HostBuilder::new()
+        .with_lattice_namespace("authorizercaps")
+        .build();
+
+    #[cfg(not(feature = "lattice"))]
+    let host = HostBuilder::new().build();
+
     host.add_actor(Actor::from_file("./examples/.assets/kvcounter.wasm")?)?;
 
     host.add_native_capability(NativeCapability::from_file(
@@ -11,13 +18,13 @@ pub(crate) fn default_authorizer_enforces_cap_attestations() -> Result<(), Box<d
         None,
     )?)?;
 
-    let res = host.bind_actor(
+    let res = host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:messaging",
         None,
         crate::common::empty_config(),
     );
-    assert!(res.is_err());
+    assert_eq!(res.err().unwrap().to_string(), "WebAssembly module authorization failure: Unauthorized binding: actor MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ is not authorized to use capability wascc:messaging.");
     host.shutdown()?;
     std::thread::sleep(::std::time::Duration::from_millis(500));
     Ok(())
@@ -26,7 +33,14 @@ pub(crate) fn default_authorizer_enforces_cap_attestations() -> Result<(), Box<d
 pub(crate) fn authorizer_blocks_bindings() -> Result<(), Box<dyn Error>> {
     // Set the authorizer before calling a bind_actor, and bind_actor should
     // return permission denied / Err if the authorizer denies that invocation.
+    #[cfg(not(feature = "lattice"))]
     let host = HostBuilder::new()
+        .with_authorizer(DenyAuthorizer::new(false, true))
+        .build();
+
+    #[cfg(feature = "lattice")]
+    let host = HostBuilder::new()
+        .with_lattice_namespace("authorizerblocks")
         .with_authorizer(DenyAuthorizer::new(false, true))
         .build();
 
@@ -40,7 +54,7 @@ pub(crate) fn authorizer_blocks_bindings() -> Result<(), Box<dyn Error>> {
         None,
     )?)?;
 
-    let res = host.bind_actor(
+    let res = host.set_binding(
         "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ",
         "wascc:keyvalue",
         None,

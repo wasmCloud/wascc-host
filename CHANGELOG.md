@@ -13,9 +13,13 @@ This version corresponds to the project milestone [0.13](https://github.com/wasc
 
 * _Lattice Control Plane Protocol_ - A new protocol is now supported on the lattice to allow for "auctions" to take place to gather a list of hosts willing to launch a given actor. An auction request is sent out with a set of constraints, any host that can satisfy those contraints responds affirmatively to the auction, and then the conductor of the auction chooses from among the responding hosts and sends a command to that specific host telling it to launch the actor in question. Launching that actor is then done by downloading the actor's bytes from a [Gantry](https://github.com/wascc/gantry) server and running it. You can specify a set of key/value pairs that define constraints that are matched against host labels to definite affinity-style scheduling rules.
 * _Sim Gantry_ - The gantry repo now has a "sim gantry" binary that developers can use to instantly start a Gantry host atop an arbitrary directory that contains signed actor modules.
+* _Lattice-Scoped Bindings_ - In lattice mode, calling `set_binding` will tell all running instances of a given capability provider to provision resources for the given actor+configuration. If a capability provider is added to a completely empty host, it will re-establish its bindings (including provisioning resources) by querying the lattice. If all instances of that provider are shut down, then the lattice will "forget" those bindings. Actors can be added and removed without the need to re-bind them to their capability providers.
+* There is now a `remove_binding` function on the `Host` struct that will tell all running instances of a given capability provider to de-provision resources for a given actor group.
+* waPC now supports the choice of multiple underlying WebAssembly engines or drivers, so waSCC host now supports them through the use of feature flags. You can now choose your engine between `wasmtime` (the default) and `wasm3`. For more information on the difference, please see the driver repository in the [waPC](https://github.com/wapc) Github organization.
 
 ### Changed
 
+* The `bind_actor` function has been renamed to `set_binding` to better provide context around the distributed, idempotent nature of bindings.
 * You can no longer invoke `configure_gantry` on a running host. The gantry client can only be supplied by the host builder now, further improving the runtime security and reliability of the host.
 * The `gantry` feature has been merged with the `lattice` feature. Gantry (client) support is no longer an isolated opt-in feature because both require the NATS connection in order to function and it didn't make sense to communicate with Gantry while not having the ability to connect to a lattice.
 * Renamed `from_bytes` on the `Actor` struct to `from_slice`, and it now takes a `&[u8]` parameter instead of an owned vector.
@@ -24,7 +28,7 @@ This version corresponds to the project milestone [0.13](https://github.com/wasc
 
 ### Removed
 
-Nothing
+* You can no longer call `set_label` on a running host. Labels _must_ be set with a `HostBuilder`
 
 ## [0.12.0] - 2020 AUG 30
 

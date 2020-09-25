@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
-use wapc::prelude::*;
+
 use wascap::jwt::{Actor, Claims};
 use wascc_codec::{capabilities::CapabilityDescriptor, deserialize, serialize};
 
@@ -29,9 +29,9 @@ const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
 const TERM_BACKOFF_MAX_TRIES: u8 = 3;
 const TERM_BACKOFF_DELAY_MS: u64 = 50;
 
-use crate::bus::event_subject;
 use latticeclient::*;
 use nats::Message;
+use wapc::WasiParams;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ControlCommand {
@@ -45,7 +45,9 @@ pub(crate) struct DistributedBus {
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     req_timeout: Duration,
     host_id: String,
+    lc: Arc<RwLock<latticeclient::Client>>,
     pub(crate) ns: Option<String>,
+    claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
 }
 
 impl DistributedBus {
@@ -60,7 +62,14 @@ impl DistributedBus {
         cplane_s: Sender<ControlCommand>,
         authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
     ) -> Self {
-        let nc = Arc::new(RwLock::new(Some(get_connection())));
+        let con = get_connection();
+        let to = get_timeout();
+        let lc = Arc::new(RwLock::new(latticeclient::Client::with_connection(
+            con.clone(),
+            to,
+            ns.clone(),
+        )));
+        let nc = Arc::new(RwLock::new(Some(con)));
 
         info!(
             "Initialized Lattice Message Bus ({})",
@@ -99,9 +108,11 @@ impl DistributedBus {
             nc,
             subs: Arc::new(RwLock::new(HashMap::new())),
             terminators,
-            req_timeout: get_timeout(),
+            req_timeout: to,
             host_id,
+            lc,
             ns: ns.clone(),
+            claims,
         }
     }
 
@@ -124,10 +135,59 @@ impl DistributedBus {
             backoffcount += 1;
         }
         let _ = self.publish_event(BusEvent::HostStopped(self.host_id.to_string()));
+        std::thread::sleep(Duration::from_millis(300));
         let mut lock = self.nc.write().unwrap();
         let conn = lock.take();
         if let Some(nc) = conn {
             nc.close();
+        }
+    }
+
+    pub fn instance_count(&self, actor: &str) -> Result<usize> {
+        match self.lc.read().unwrap().get_actors() {
+            Ok(res) => {
+                let count = res.values().into_iter().fold(0, |acc, x| {
+                    acc + x
+                        .iter()
+                        .filter(|c| c.subject == actor)
+                        .collect::<Vec<_>>()
+                        .len()
+                });
+                Ok(count)
+            }
+            Err(e) => Err(format!("Failed to determine instance count for actor: {}", e).into()),
+        }
+    }
+
+    pub fn discover_claims(&self, actor: &str) -> Option<Claims<wascap::jwt::Actor>> {
+        let res = match self.lc.read().unwrap().get_actors() {
+            Ok(res) => {
+                let flattened = res.values().into_iter().flatten().collect::<Vec<_>>();
+                let mut claims = flattened.into_iter().filter(|c| c.subject == actor).take(1);
+                match claims.next() {
+                    Some(c) => Some(c.clone()),
+                    None => None,
+                }
+            }
+            Err(_e) => None,
+        };
+        if res.is_some() {
+            res
+        } else {
+            self.claims.read().unwrap().get(actor).cloned()
+        }
+    }
+
+    pub fn query_bindings(&self) -> Result<Vec<latticeclient::Binding>> {
+        match self.lc.read().unwrap().get_bindings() {
+            Ok(r) => {
+                let v: Vec<_> = r.values().fold(vec![], |mut acc, x| {
+                    acc.extend_from_slice(x);
+                    acc
+                });
+                Ok(v)
+            }
+            Err(e) => Err(format!("Failed to query bindings from lattice : {}", e).into()),
         }
     }
 
@@ -152,14 +212,45 @@ impl DistributedBus {
         Ok(())
     }
 
+    pub fn nqsubscribe(
+        &self,
+        subject: &str,
+        sender: Sender<Invocation>,
+        receiver: Receiver<InvocationResponse>,
+    ) -> Result<()> {
+        let sub = self
+            .nc
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .subscribe(subject)?
+            .with_handler(move |msg| {
+                handle_invocation(&msg, sender.clone(), receiver.clone());
+                Ok(())
+            });
+        self.subs.write().unwrap().insert(subject.to_string(), sub);
+        Ok(())
+    }
+
     pub fn invoke(&self, subject: &str, inv: Invocation) -> Result<InvocationResponse> {
-        let resp = self.nc.read().unwrap().as_ref().unwrap().request_timeout(
-            &subject,
-            &serialize(inv)?,
-            self.req_timeout,
-        )?;
-        let ir: InvocationResponse = deserialize(&resp.data)?;
-        Ok(ir)
+        if self.nc.read().unwrap().as_ref().is_none() {
+            error!(
+                "Attempted bus invoke with no bus connection: {} {:?}->{:?}",
+                inv.operation, inv.origin, inv.target
+            );
+            Err(crate::errors::new(crate::errors::ErrorKind::MiscHost(
+                "Attempted a bus invocation without a live bus connection".to_string(),
+            )))
+        } else {
+            let resp = self.nc.read().unwrap().as_ref().unwrap().request_timeout(
+                &subject,
+                &serialize(inv)?,
+                self.req_timeout,
+            )?;
+            let ir: InvocationResponse = deserialize(&resp.data)?;
+            Ok(ir)
+        }
     }
 
     pub fn unsubscribe(&self, subject: &str) -> Result<()> {
@@ -484,9 +575,13 @@ fn respond_with_actors(
     host: String,
     claims: Arc<RwLock<HashMap<String, Claims<Actor>>>>,
 ) -> std::result::Result<(), std::io::Error> {
+    let actorlist = {
+        let lock = claims.read().unwrap();
+        lock.values().cloned().collect()
+    };
     let ir = InventoryResponse::Actors {
         host,
-        actors: claims.read().unwrap().values().cloned().collect(),
+        actors: actorlist,
     };
     msg.respond(serde_json::to_vec(&ir).unwrap())
         .map_err(|e| e.into())
@@ -550,9 +645,12 @@ fn handle_invocation(
     // TODO: when we implement the issue, publish an antiforgery check event on wasmbus.events
     // TODO: when we implement the issue, add the host origin of the invocation to the global lattice block list
     } else {
-        sender.send(inv).unwrap();
-        let inv_r = receiver.recv().unwrap();
-        msg.respond(serialize(inv_r).unwrap()).unwrap();
+        if let Ok(()) = sender.send(inv) {
+            let inv_r = receiver.recv().unwrap();
+            msg.respond(serialize(inv_r).unwrap()).unwrap();
+        } else {
+            warn!("Received invocation but its destination thread is no longer running.");
+        }
     }
 }
 
