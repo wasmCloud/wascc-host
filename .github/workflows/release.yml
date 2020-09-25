@@ -47,6 +47,11 @@ jobs:
         uses: actions/download-artifact@v1
         with:
           name: release_url
+      - name: Install clang on Windows
+        if: ${{ startsWith(matrix.os, 'windows') }}
+        run: |
+          curl -fsSL -o LLVM9.exe https://releases.llvm.org/9.0.0/LLVM-9.0.0-win64.exe
+          7z x LLVM9.exe -y -o"C:/Program Files/LLVM"
       - name: Create release Build
         run: cargo build --features "bin manifest lattice ${{ matrix.engine }}" --release
       - name: Install 7Zip PowerShell Module (win)
