@@ -102,4 +102,4 @@ jobs:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: cargo login ${{ env.CRATES_TOKEN }}
       - name: Cargo publish
-        run: cargo publish --no-verify        
+        run: cargo publish --no-verify
