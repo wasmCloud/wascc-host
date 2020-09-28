@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.13.0"
+version = "0.13.1"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -45,7 +45,7 @@ data-encoding = "2.3.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 # Opt-in dependencies chosen by feature flags
-gantryclient = { version = "0.0.9", optional = true }
+gantryclient = { version = "0.1.0", optional = true }
 nats = { version = "0.7.3", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.13", optional = true }

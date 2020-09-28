@@ -9,9 +9,9 @@ extern crate log;
 
 #[derive(Debug, StructOpt, Clone)]
 #[structopt(
-    global_settings(&[AppSettings::ColoredHelp, AppSettings::VersionlessSubcommands]),
-    name = "wascc-host",
-    about = "A general-purpose waSCC runtime host")]
+global_settings(& [AppSettings::ColoredHelp, AppSettings::VersionlessSubcommands]),
+name = "wascc-host",
+about = "A general-purpose waSCC runtime host")]
 struct Cli {
     #[structopt(flatten)]
     command: CliCommand,
@@ -85,8 +85,17 @@ fn get_gantry_client() -> gantryclient::Client {
     let creds = get_credsfile();
     let timeout = get_timeout();
 
-    info!("Gantry client created.");
-    gantryclient::Client::new(&host, creds.map(|c| c.into()), timeout)
+    match gantryclient::Client::try_new(&host, creds.map(|c| c.into()), timeout) {
+        Ok(c) => {
+            info!("Gantry client created.");
+            c
+        }
+        Err(e) => {
+            error!("Failed to create Gantry client. Check if NATS is running and client is configured properly.");
+            error!("Terminating host (no lattice connectivity)");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn get_credsfile() -> Option<String> {
@@ -119,8 +128,10 @@ fn get_timeout() -> Duration {
     }
 }
 
-const LATTICE_HOST_KEY: &str = "LATTICE_HOST"; // env var name
-const DEFAULT_LATTICE_HOST: &str = "127.0.0.1"; // default mode is anonymous via loopback
+const LATTICE_HOST_KEY: &str = "LATTICE_HOST";
+// env var name
+const DEFAULT_LATTICE_HOST: &str = "127.0.0.1";
+// default mode is anonymous via loopback
 const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
 const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 600;
 const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
