@@ -20,7 +20,7 @@ jobs:
 
   test_no_nats:
     name: Test without lattice and NATS
-    runs-un: ubuntu-latest
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         engine: ["wasm3", "wasmtime"]
