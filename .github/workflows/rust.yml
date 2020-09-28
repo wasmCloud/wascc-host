@@ -32,6 +32,7 @@ jobs:
           - 6379:6379
     steps:
       - uses: actions/checkout@v2
+      - name: Run tests (no lattice no NATS)
         run: cargo test --features "bin ${{ matrix.engine }}" -- --test-threads=1
   
   test:
