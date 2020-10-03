@@ -57,10 +57,13 @@ pub(crate) fn kv_host() -> Result<(), Box<dyn Error>> {
 pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
     let host = Host::new();
 
+    let fs_binding_name = "fs_host_error_test_binding".to_string();
+
     host.add_native_capability(wascc_host::NativeCapability::from_instance(
         wascc_fs::FileSystemProvider::new(),
-        None,
+        Some(fs_binding_name.clone()),
     )?)?;
+
     let mut hm = HashMap::new();
     hm.insert(
         "ROOT".to_string(),
@@ -73,7 +76,7 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
     host.set_binding(
         "MD3U6BFGA5LT7VUQK77247Z27XF3NBCSHXTFSZIIVLG5NYVK275I4VQX",
         "wascc:blobstore",
-        None,
+        Some(fs_binding_name.clone()),
         hm,
     )?;
 
