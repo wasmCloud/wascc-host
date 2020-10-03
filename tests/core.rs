@@ -1,4 +1,4 @@
-extern crate wascc_fs;
+extern crate dummy_fs_provider;
 use reqwest;
 use std::collections::HashMap;
 use std::error::Error;
@@ -60,7 +60,7 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
     let fs_binding_name = "fs_host_error_test_binding".to_string();
 
     host.add_native_capability(wascc_host::NativeCapability::from_instance(
-        wascc_fs::FileSystemProvider::new(),
+        dummy_fs_provider::DummyFsProvider::new(),
         Some(fs_binding_name.clone()),
     )?)?;
 
