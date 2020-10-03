@@ -91,9 +91,17 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
             wascc_codec::core::OP_INITIALIZE,
             &buf,
         )
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
 
-    assert!(expected_error.to_string().ends_with("THIS IS THE WAY"));
+    let expected_str = "THIS IS THE WAY";
+    assert!(
+        expected_error.ends_with(expected_str),
+        "Doest not end with '{}'. Error received = <{}>",
+        expected_str,
+        expected_error
+    );
 
+    host.shutdown()?;
     Ok(())
 }
