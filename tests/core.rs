@@ -64,12 +64,6 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
         Some(fs_binding_name.clone()),
     )?)?;
 
-    let mut hm = HashMap::new();
-    hm.insert(
-        "ROOT".to_string(),
-        "/some/random/dir/that/doesnt/exists".to_string(),
-    );
-
     let actor = wascc_host::Actor::from_file("./tests/resources/dummy-actor/dummy_actor.wasm")?;
 
     host.add_actor(actor)?;
@@ -77,7 +71,7 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
         "MD3U6BFGA5LT7VUQK77247Z27XF3NBCSHXTFSZIIVLG5NYVK275I4VQX",
         "wascc:blobstore",
         Some(fs_binding_name.clone()),
-        hm,
+        HashMap::new(),
     )?;
 
     let config = CapabilityConfiguration {
@@ -94,13 +88,13 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
             wascc_codec::core::OP_INITIALIZE,
             &buf,
         )
-        .expect_err("Actor did not return the expected error.")
+        .expect_err("Actor did not return an error as expected.")
         .to_string();
 
     let expected_end_str = "dummy_container_removal: THIS IS THE WAY";
     assert!(
         expected_error.ends_with(expected_end_str),
-        "Error message received does not end with '{}'. Got error: <{}>",
+        "Error message received does not end with '{}'. Got this error instead: <{}>",
         expected_end_str,
         expected_error
     );
