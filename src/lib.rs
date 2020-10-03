@@ -700,11 +700,9 @@ impl Host {
         );
         let tgt_subject = bus::actor_subject(self.ns.as_ref().map(String::as_str), actor);
         match self.bus.invoke(&tgt_subject, inv) {
-            Ok(resp) => {
-                match resp.error {
-                    Some(e) => Err(e.into()),
-                    None => Ok(resp.msg)
-                }
+            Ok(resp) => match resp.error {
+                Some(e) => Err(e.into()),
+                None => Ok(resp.msg),
             },
             Err(e) => Err(e),
         }

@@ -1,9 +1,9 @@
 extern crate wascc_fs;
 use reqwest;
-use std::error::Error;
-use wascc_host::Host;
 use std::collections::HashMap;
+use std::error::Error;
 use wascc_codec::core::CapabilityConfiguration;
+use wascc_host::Host;
 
 pub(crate) fn stock_host() -> Result<(), Box<dyn Error>> {
     let host = crate::common::gen_stock_host(9090)?;
@@ -54,9 +54,7 @@ pub(crate) fn kv_host() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-
 pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
-
     let host = Host::new();
 
     host.add_native_capability(wascc_host::NativeCapability::from_instance(
@@ -64,27 +62,38 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
         None,
     )?)?;
     let mut hm = HashMap::new();
-    hm.insert("ROOT".to_string(),
-              "/some/random/dir/that/doesnt/exists".to_string());
+    hm.insert(
+        "ROOT".to_string(),
+        "/some/random/dir/that/doesnt/exists".to_string(),
+    );
 
     let actor = wascc_host::Actor::from_file("./tests/resources/dummy-actor/dummy_actor.wasm")?;
 
     host.add_actor(actor)?;
-    host.set_binding("MD3U6BFGA5LT7VUQK77247Z27XF3NBCSHXTFSZIIVLG5NYVK275I4VQX",
-                     "wascc:blobstore", None,
-                     hm)?;
+    host.set_binding(
+        "MD3U6BFGA5LT7VUQK77247Z27XF3NBCSHXTFSZIIVLG5NYVK275I4VQX",
+        "wascc:blobstore",
+        None,
+        hm,
+    )?;
 
-
-    let config = CapabilityConfiguration{module: "actor-init".to_string(), values: HashMap::new()};
+    let config = CapabilityConfiguration {
+        module: "actor-init".to_string(),
+        values: HashMap::new(),
+    };
     let buf = wascc_codec::serialize(config).unwrap();
 
     //Expects the actor to trigger a call to a provider that will result in an error.
-    // If it doesn't trigger an error this call will fail in a panic.
-    let expected_error = host.call_actor("MD3U6BFGA5LT7VUQK77247Z27XF3NBCSHXTFSZIIVLG5NYVK275I4VQX",
-                              wascc_codec::core::OP_INITIALIZE, &buf).unwrap_err();
+    //If it doesn't trigger an error this call will fail in a panic.
+    let expected_error = host
+        .call_actor(
+            "MD3U6BFGA5LT7VUQK77247Z27XF3NBCSHXTFSZIIVLG5NYVK275I4VQX",
+            wascc_codec::core::OP_INITIALIZE,
+            &buf,
+        )
+        .unwrap_err();
 
-    assert!(expected_error.to_string().ends_with( "THIS IS THE WAY"));
+    assert!(expected_error.to_string().ends_with("THIS IS THE WAY"));
 
     Ok(())
 }
-
