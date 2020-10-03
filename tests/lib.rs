@@ -33,6 +33,11 @@ fn kv_host() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn fs_host_error() -> Result<(), Box<dyn Error>> {
+    core::fs_host_error()
+}
+
+#[test]
 #[cfg(feature = "lattice")]
 fn unload_reload_actor_retains_bindings() -> Result<(), Box<dyn Error>> {
     lattice::unload_reload_actor_retains_bindings()

@@ -434,7 +434,12 @@ pub(crate) fn wapc_host_callback(
         }
     };
     match bus.invoke(&invoke_subject, inv) {
-        Ok(inv_r) => Ok(inv_r.msg),
+        Ok(inv_r) => {
+            match inv_r.error {
+                Some(e) => Err(format!("Invocation failure: {}", e).into()),
+                None => Ok(inv_r.msg)
+            }
+        },
         Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
             e.into(),
         )))),
