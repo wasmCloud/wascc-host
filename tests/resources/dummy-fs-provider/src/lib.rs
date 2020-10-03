@@ -9,7 +9,6 @@ use codec::core::{CapabilityConfiguration, OP_BIND_ACTOR, OP_REMOVE_ACTOR};
 use codec::{deserialize, serialize};
 
 use std::error::Error;
-use std::fmt::Formatter;
 use std::sync::RwLock;
 #[cfg(not(feature = "static_plugin"))]
 capability_provider!(DummyFsProvider, DummyFsProvider::new);
