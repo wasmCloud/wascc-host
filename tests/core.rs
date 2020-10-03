@@ -94,14 +94,14 @@ pub(crate) fn fs_host_error() -> Result<(), Box<dyn Error>> {
             wascc_codec::core::OP_INITIALIZE,
             &buf,
         )
-        .unwrap_err()
+        .expect_err("Actor did not return the expected error.")
         .to_string();
 
-    let expected_str = "THIS IS THE WAY";
+    let expected_end_str = "dummy_container_removal: THIS IS THE WAY";
     assert!(
-        expected_error.ends_with(expected_str),
-        "Doest not end with '{}'. Error received = <{}>",
-        expected_str,
+        expected_error.ends_with(expected_end_str),
+        "Error message received does not end with '{}'. Got error: <{}>",
+        expected_end_str,
         expected_error
     );
 
