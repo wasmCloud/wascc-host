@@ -63,7 +63,6 @@ mockito = "0.27"
 redis = "0.17.0"
 nats = "0.7.3"
 serde_json = "1.0.57"
-dummy-fs-provider={version="0.1.0", path="./tests/resources/dummy-fs-provider", features=["static_plugin"]}
 
 
 [features]
