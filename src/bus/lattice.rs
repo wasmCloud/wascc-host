@@ -61,6 +61,7 @@ impl DistributedBus {
         ns: Option<String>,
         cplane_s: Sender<ControlCommand>,
         authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
+        image_map: Arc<RwLock<HashMap<String, String>>>,
     ) -> Self {
         let con = get_connection();
         let to = get_timeout();
@@ -90,6 +91,7 @@ impl DistributedBus {
             ns.clone(),
             cplane_s,
             authz,
+            image_map.clone(),
         )
         .unwrap();
 
@@ -102,6 +104,7 @@ impl DistributedBus {
             SystemTime::now(),
             labels,
             ns.clone(),
+            image_map.clone(),
         )
         .unwrap();
         DistributedBus {
@@ -330,7 +333,7 @@ pub(crate) fn spawn_controlplane(
     let terminators = host.terminators.clone();
     let hk = host.key.clone();
     let auth = host.authorizer.clone();
-    let gantry = host.gantry_client.clone();
+    let image_map = host.image_map.clone();
 
     let subject = format!(
         "{}.{}.{}",
@@ -360,8 +363,10 @@ pub(crate) fn spawn_controlplane(
                             } else {
                                 info!("Acknowledged actor start request.");
                             }
-                            match fetch_actor(&cmd.actor_id, gantry.clone(), cmd.revision) {
+                            // As of 0.14.0, the "actor_id" here is actually an OCI registry image reference
+                            match fetch_actor(&cmd.actor_id) {
                                 Ok(a) => {
+                                    image_map.write().unwrap().insert(cmd.actor_id.to_string(), a.public_key());
                                     let wg = crossbeam_utils::sync::WaitGroup::new();
                                     if crate::authz::enforce_validation(&a.token.jwt).is_err() {
                                         error!("Attempt to remotely schedule invalid actor.");
@@ -381,7 +386,7 @@ pub(crate) fn spawn_controlplane(
                                     let _ = crate::spawns::spawn_actor(wg, a.token.claims.clone(), a.bytes,
                                         None, actor, binding.clone(), bus.clone(), mids.clone(),
                                         caps.clone(), bindings.clone(), claimsmap.clone(), terminators.clone(),
-                                        hk.clone(), auth.clone());
+                                        hk.clone(), auth.clone(), image_map.clone(), Some(cmd.actor_id.to_string()));
 
 
                                 },
@@ -409,41 +414,10 @@ pub(crate) fn spawn_controlplane(
     Ok(())
 }
 
-fn fetch_actor(
-    actor_id: &str,
-    gantry: Arc<RwLock<Option<gantryclient::Client>>>,
-    revision: u32,
-) -> Result<crate::actor::Actor> {
-    let vec = actor_bytes_from_gantry(actor_id, gantry, revision)?;
+fn fetch_actor(actor_id: &str) -> Result<crate::actor::Actor> {
+    let vec = crate::inthost::fetch_oci_bytes(actor_id)?;
 
     crate::actor::Actor::from_slice(&vec)
-}
-
-pub(crate) fn actor_bytes_from_gantry(
-    actor_id: &str,
-    gantry_client: Arc<RwLock<Option<gantryclient::Client>>>,
-    revision: u32,
-) -> Result<Vec<u8>> {
-    {
-        let lock = gantry_client.read().unwrap();
-        if lock.as_ref().is_none() {
-            return Err(crate::errors::new(crate::errors::ErrorKind::MiscHost(
-                "No gantry client configured".to_string(),
-            )));
-        }
-    }
-    match gantry_client
-        .read()
-        .unwrap()
-        .as_ref()
-        .unwrap()
-        .download_actor(actor_id, revision)
-    {
-        Ok(v) => Ok(v),
-        Err(e) => Err(crate::errors::new(crate::errors::ErrorKind::MiscHost(
-            format!("{}", e),
-        ))),
-    }
 }
 
 fn spawn_controlplane_handler(
@@ -456,6 +430,7 @@ fn spawn_controlplane_handler(
     ns: Option<String>,
     cplane_s: Sender<ControlCommand>,
     authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
+    image_map: Arc<RwLock<HashMap<String, String>>>,
 ) -> Result<()> {
     let subject = controlplane_wildcard_subject(ns.as_ref().map(String::as_str));
     let lbs = labels.clone();
@@ -473,14 +448,15 @@ fn spawn_controlplane_handler(
                 cplane_s.send(ControlCommand::StartActor(lc, msg)).unwrap();
             } else if msg.subject.ends_with(TERMINATE_ACTOR) && msg.subject.contains(&host_id) {
                 let tc: TerminateCommand = serde_json::from_slice(&msg.data).unwrap();
-                if !claims.read().unwrap().contains_key(&tc.actor_id) {
+                if !image_map.read().unwrap().contains_key(&tc.actor_id) {
+                    // actor IDs are OCI image references in the requests
                     warn!("Received request to terminate non-existent actor. Ignoring.");
                 } else {
                     cplane_s.send(ControlCommand::TerminateActor(tc)).unwrap();
                 }
             } else if msg.subject.ends_with(AUCTION_REQ) {
                 let req: LaunchAuctionRequest = serde_json::from_slice(&msg.data)?;
-                if claims.read().unwrap().contains_key(&req.actor_id) {
+                if image_map.read().unwrap().contains_key(&req.actor_id) {
                     trace!("Skipping auction response - actor already running locally.");
                 } else {
                     // TODO: validate constraint requirements
@@ -526,6 +502,7 @@ fn spawn_inventory_handler(
     started: SystemTime,
     labels: Arc<RwLock<HashMap<String, String>>>,
     ns: Option<String>,
+    image_map: Arc<RwLock<HashMap<String, String>>>,
 ) -> Result<()> {
     let lbs = labels.clone();
     let subject = super::inventory_wildcard_subject(ns.as_ref().map(String::as_str));

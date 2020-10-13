@@ -1,7 +1,7 @@
 // An example demonstrating loading a manifest
-// For this to run, you'll need both the `manifest` and `gantry`
-// features enabled, you can do that as follows from the root wascc-host directory:
-// cargo run --example kvcounter_manfifest --all-features
+// For this to run, you'll need the `manifest` feature enabled. You can do that as follows from the
+// root wascc-host directory:
+// cargo run --example kvcounter_manfifest --features "manifest"
 
 use wascc_host::{Host, HostManifest};
 

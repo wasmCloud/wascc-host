@@ -10,6 +10,7 @@ use crate::bus::MessageBus;
 use crate::BindingsList;
 use crate::{authz, errors, Actor, Authorizer, NativeCapability, RouteKey};
 use errors::ErrorKind;
+use std::str::FromStr;
 use std::{
     collections::HashMap,
     io::Read,
@@ -27,6 +28,10 @@ use wascc_codec::{
 pub(crate) const CORELABEL_ARCH: &str = "hostcore.arch";
 pub(crate) const CORELABEL_OS: &str = "hostcore.os";
 pub(crate) const CORELABEL_OSFAMILY: &str = "hostcore.osfamily";
+
+pub(crate) const OCI_VAR_USER: &str = "OCI_REGISTRY_USER";
+pub(crate) const OCI_VAR_PASSWORD: &str = "OCI_REGISTRY_PASSWORD";
+
 #[allow(dead_code)]
 pub(crate) const RESTRICTED_LABELS: [&str; 3] = [CORELABEL_OSFAMILY, CORELABEL_ARCH, CORELABEL_OS];
 
@@ -441,6 +446,42 @@ pub(crate) fn wapc_host_callback(
         Err(e) => Err(Box::new(errors::new(errors::ErrorKind::HostCallFailure(
             e.into(),
         )))),
+    }
+}
+
+pub(crate) fn fetch_oci_bytes(img: &str) -> Result<Vec<u8>> {
+    let cfg = oci_distribution::client::ClientConfig::default();
+    let mut c = oci_distribution::Client::new(cfg);
+
+    let img = oci_distribution::Reference::from_str(img).map_err(|e| {
+        crate::errors::new(crate::errors::ErrorKind::MiscHost(
+            "Could not parse OCI distribution reference".to_string(),
+        ))
+    })?;
+    let auth = if let Ok(u) = std::env::var(OCI_VAR_USER) {
+        if let Ok(p) = std::env::var(OCI_VAR_PASSWORD) {
+            oci_distribution::secrets::RegistryAuth::Basic(u, p)
+        } else {
+            oci_distribution::secrets::RegistryAuth::Anonymous
+        }
+    } else {
+        oci_distribution::secrets::RegistryAuth::Anonymous
+    };
+    let imgdata: Result<oci_distribution::client::ImageData> =
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            c.pull_image(&img, &auth)
+                .await
+                .map_err(|e| format!("{}", e).into())
+        });
+
+    match imgdata {
+        Ok(imgdata) => Ok(imgdata.content),
+        Err(e) => {
+            error!("Failed to fetch OCI bytes: {}", e);
+            Err(crate::errors::new(crate::errors::ErrorKind::MiscHost(
+                "Failed to fetch OCI bytes".to_string(),
+            )))
+        }
     }
 }
 

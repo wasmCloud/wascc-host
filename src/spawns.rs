@@ -44,6 +44,8 @@ pub(crate) fn spawn_actor(
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
     hk: KeyPair,
     auth: Arc<RwLock<Box<dyn Authorizer>>>,
+    image_map: Arc<RwLock<HashMap<String, String>>>,
+    imgref: Option<String>,
 ) -> Result<()> {
     let c = claims.clone();
     let b = bus.clone();
@@ -153,9 +155,15 @@ pub(crate) fn spawn_actor(
                     } else {
                         #[cfg(feature = "lattice")]
                         let _ = b.publish_event(BusEvent::ActorStopped{ host: hostkey.public_key(), actor: claims.subject.to_string() });
+
                         let mut lock = claimsmap.write().unwrap();
                         let _ = lock.remove(&claims.subject);
                         drop(lock);
+                        if let Some(ref ir) = imgref { // if this actor was added via OCI image ref, remove the mapping
+                            let mut lock = image_map.write().unwrap();
+                            let _ = lock.remove(ir);
+                            drop(lock);
+                        }
                         deconfigure_actor(hostkey.clone(),b.clone(), bindings.clone(), &claims.subject);
                     }
                     break "".to_string(); // TODO: WHY WHY WHY does this recv arm need to return a value?!?!?

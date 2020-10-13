@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 _The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)_
 
+## [0.14.0] - 2020 OCT 30
+
+This version corresponds to the project milestone [0.14](https://github.com/wascc/wascc-host/milestone/3)
+
+### Added
+
+* Host runtime will now look at the `OCI_REGISTRY_USER` and `OCI_REGISTRY_PASSWORD` environment variables whenever it needs to contact an OCI registry.
+
+### Changed
+
+* All non-local references to capability providers and actors are now assumed to be registry references that can be satisfied by the indicated OCI registry. If basic authentication is required by that registry, then you can supply those credentials via the `OCI_REGISTRY_USER` and `OCI_REGISTRY_PASSWORD` environment variables.
+* The `add_actor_from_gantry` function has been renamed to `add_actor_from_registry`
+* Manifest files will now load either actors (if the actor string exists as a file) or registry-hosted modules (if the actor string is a registry reference)
+
+
 ## [0.13.0] - 2020 SEP 30
 
 This version corresponds to the project milestone [0.13](https://github.com/wascc/wascc-host/milestone/2)
