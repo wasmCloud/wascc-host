@@ -49,10 +49,13 @@ pub(crate) fn spawn_actor(
 ) -> Result<()> {
     let c = claims.clone();
     let b = bus.clone();
-    let hostkey = hk.clone();
+    let seed = hk.seed().unwrap();
+    let s = seed.clone();
+    let hostkey = KeyPair::from_seed(&hk.seed().unwrap()).unwrap();
     let authorizer = auth.clone();
 
     thread::spawn(move || {
+        let hk = KeyPair::from_seed(&seed).unwrap();
         if actor {
             #[cfg(feature = "lattice")]
             let _ = bus.publish_event(BusEvent::ActorStarting {
@@ -66,8 +69,9 @@ pub(crate) fn spawn_actor(
         let engine = wasm3_provider::Wasm3EngineProvider::new(&buf);
 
         let mut guest = WapcHost::new(Box::new(engine), move |_id, bd, ns, op, payload| {
+            let key = KeyPair::from_seed(&s).unwrap();
             wapc_host_callback(
-                hk.clone(),
+                key,
                 c.clone(),
                 bus.clone(),
                 bd,
@@ -125,6 +129,7 @@ pub(crate) fn spawn_actor(
             info!("Actor {} up and running.", &claims.subject);
         }
         loop {
+            let key = KeyPair::from_seed(&seed).unwrap();
             select! {
                 recv(inv_r) -> inv => {
                     if let Ok(inv) = inv {
@@ -164,7 +169,7 @@ pub(crate) fn spawn_actor(
                             let _ = lock.remove(ir);
                             drop(lock);
                         }
-                        deconfigure_actor(hostkey.clone(),b.clone(), bindings.clone(), &claims.subject);
+                        deconfigure_actor(key,b.clone(), bindings.clone(), &claims.subject);
                     }
                     break "".to_string(); // TODO: WHY WHY WHY does this recv arm need to return a value?!?!?
                 }

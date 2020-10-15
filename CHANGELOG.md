@@ -12,6 +12,7 @@ This version corresponds to the project milestone [0.14](https://github.com/wasc
 ### Added
 
 * Host runtime will now look at the `OCI_REGISTRY_USER` and `OCI_REGISTRY_PASSWORD` environment variables whenever it needs to contact an OCI registry.
+* Added the `add_native_capability_from_registry` to download and load an OS/CPU arch appropriate provider plugin.
 
 ### Changed
 
@@ -19,6 +20,11 @@ This version corresponds to the project milestone [0.14](https://github.com/wasc
 * The `add_actor_from_gantry` function has been renamed to `add_actor_from_registry`
 * Manifest files will now load either actors (if the actor string exists as a file) or registry-hosted modules (if the actor string is a registry reference)
 
+### Caution
+
+The ability to remotely schedule capability providers in this version should be considered unstable, to be 
+stabilized in the 0.15.0 release (the "async rewrite"), which will include a rework of how capability providers
+internally subscribe to the message bus and identify themselves to the host and lattice.
 
 ## [0.13.0] - 2020 SEP 30
 

@@ -1,11 +1,11 @@
-use crate::{BindingsList, RouteKey};
+use crate::{BindingsList, NativeCapability, RouteKey};
 use crate::{Invocation, InvocationResponse, Result};
 use crossbeam::{Receiver, Sender};
 use crossbeam_channel as channel;
 use latticeclient::{
     controlplane::{
-        LaunchAck, LaunchAuctionRequest, LaunchAuctionResponse, LaunchCommand, TerminateCommand,
-        AUCTION_REQ, CPLANE_PREFIX, LAUNCH_ACTOR, TERMINATE_ACTOR,
+        LaunchAck, LaunchAuctionRequest, LaunchAuctionResponse, LaunchCommand, ProviderLaunchAck,
+        TerminateCommand, AUCTION_REQ, CPLANE_PREFIX, LAUNCH_ACTOR, TERMINATE_ACTOR,
     },
     BusEvent, CloudEvent,
 };
@@ -29,14 +29,24 @@ const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
 const TERM_BACKOFF_MAX_TRIES: u8 = 3;
 const TERM_BACKOFF_DELAY_MS: u64 = 50;
 
+use crate::inthost::{CORELABEL_ARCH, CORELABEL_OS};
+use latticeclient::controlplane::{
+    LaunchProviderCommand, ProviderAuctionRequest, ProviderAuctionResponse,
+    TerminateProviderCommand, LAUNCH_PROVIDER, PROVIDER_AUCTION_REQ, TERMINATE_PROVIDER,
+};
 use latticeclient::*;
 use nats::Message;
+use std::fs::File;
+use std::path::Path;
 use wapc::WasiParams;
+use wascap::prelude::KeyPair;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ControlCommand {
     TerminateActor(TerminateCommand),
+    TerminateProvider(TerminateProviderCommand),
     StartActor(LaunchCommand, Message),
+    StartProvider(LaunchProviderCommand, Message),
 }
 
 pub(crate) struct DistributedBus {
@@ -326,14 +336,16 @@ pub(crate) fn spawn_controlplane(
     let actor = true;
     let binding: Option<String> = None;
     let bus = host.bus.clone();
+    let plugins = host.plugins.clone();
     let mids = host.middlewares.clone();
     let caps = host.caps.clone();
     let bindings = host.bindings.clone();
     let claimsmap = host.claims.clone();
     let terminators = host.terminators.clone();
-    let hk = host.key.clone();
+    let hk = KeyPair::from_seed(&host.sk).unwrap();
     let auth = host.authorizer.clone();
     let image_map = host.image_map.clone();
+    let labels = host.labels.clone();
 
     let subject = format!(
         "{}.{}.{}",
@@ -348,6 +360,7 @@ pub(crate) fn spawn_controlplane(
         .insert(subject.to_string(), term_s);
 
     thread::spawn(move || loop {
+        let key = KeyPair::from_seed(&hk.seed().unwrap()).unwrap();
         select! {
             recv(com_r) -> cmd => {
                 if let Ok(cmd) = cmd {
@@ -364,7 +377,7 @@ pub(crate) fn spawn_controlplane(
                                 info!("Acknowledged actor start request.");
                             }
                             // As of 0.14.0, the "actor_id" here is actually an OCI registry image reference
-                            match fetch_actor(&cmd.actor_id) {
+                            match crate::inthost::fetch_actor(&cmd.actor_id) {
                                 Ok(a) => {
                                     image_map.write().unwrap().insert(cmd.actor_id.to_string(), a.public_key());
                                     let wg = crossbeam_utils::sync::WaitGroup::new();
@@ -386,7 +399,7 @@ pub(crate) fn spawn_controlplane(
                                     let _ = crate::spawns::spawn_actor(wg, a.token.claims.clone(), a.bytes,
                                         None, actor, binding.clone(), bus.clone(), mids.clone(),
                                         caps.clone(), bindings.clone(), claimsmap.clone(), terminators.clone(),
-                                        hk.clone(), auth.clone(), image_map.clone(), Some(cmd.actor_id.to_string()));
+                                        key, auth.clone(), image_map.clone(), Some(cmd.actor_id.to_string()));
 
 
                                 },
@@ -396,11 +409,60 @@ pub(crate) fn spawn_controlplane(
                             }
                         },
                         ControlCommand::TerminateActor(cmd) => {
-                            let actor_subject = bus.actor_subject(&cmd.actor_id);
+                            let pk = image_map.read().unwrap()[&cmd.actor_id].to_string(); // get PK from the OCI ref
+                            image_map.write().unwrap().remove(&pk);
+                            let actor_subject = bus.actor_subject(&pk);
                             terminators.read().unwrap()
                                 [&actor_subject]
                                 .send(true)
                                 .unwrap();
+                        },
+                        ControlCommand::TerminateProvider(cmd) => {
+                            // TODO: this command will continue to be a no-op until the "async rewrite",
+                            // which should include a re-organization of how providers subscribe to the bus
+                        },
+                        ControlCommand::StartProvider(cmd, msg) => {
+                            if let Err(e) = msg.respond(&serde_json::to_vec(&ProviderLaunchAck {
+                                provider_ref: cmd.provider_ref.to_string(),
+                                host: hk.public_key()
+                            }).unwrap()) {
+                                error!("Failed to send schedule provider acknowledgement reply: {}", e);
+                            } else {
+                                info!("Acknowledged provider start request.");
+                            }
+                            match crate::inthost::fetch_provider(&cmd.provider_ref, &cmd.binding_name, labels.clone()) {
+                                Ok((p, c)) => {
+                                    if caps
+                                       .read()
+                                       .unwrap()
+                                       .contains_key(&RouteKey::new(&cmd.binding_name, &p.id()))
+                                    {
+                                        error!(
+                                          "Capability provider {} cannot be bound to the same name ({}) twice, loading failed.", p.id(), &cmd.binding_name
+                                        );
+                                    }
+                                    caps.write().unwrap().insert(
+                                        RouteKey::new(&cmd.binding_name, &p.descriptor.id),
+                                        p.descriptor().clone(),
+                                    );
+                                    let wg = crossbeam_utils::sync::WaitGroup::new();
+                                    let key = KeyPair::from_seed(&hk.seed().unwrap()).unwrap();
+                                    let _ = crate::spawns::spawn_native_capability(
+                                        p,
+                                        bus.clone(),
+                                        mids.clone(),
+                                        bindings.clone(),
+                                        terminators.clone(),
+                                        plugins.clone(),
+                                        wg.clone(),
+                                        Arc::new(key),
+                                    );
+                                    wg.wait();
+                                },
+                                Err(e) => {
+                                    error!("Provider download failed to {}: {}", &cmd.provider_ref, e)
+                                }
+                            }
                         }
                     }
                 }
@@ -414,12 +476,8 @@ pub(crate) fn spawn_controlplane(
     Ok(())
 }
 
-fn fetch_actor(actor_id: &str) -> Result<crate::actor::Actor> {
-    let vec = crate::inthost::fetch_oci_bytes(actor_id)?;
-
-    crate::actor::Actor::from_slice(&vec)
-}
-
+// This thread handles control plane commands or demands, e.g. "launch actor" and "launch provider"
+// It also responds to provider and actor auctions
 fn spawn_controlplane_handler(
     nc: Arc<RwLock<Option<nats::Connection>>>,
     host_id: String,
@@ -454,12 +512,38 @@ fn spawn_controlplane_handler(
                 } else {
                     cplane_s.send(ControlCommand::TerminateActor(tc)).unwrap();
                 }
+            } else if msg.subject.ends_with(LAUNCH_PROVIDER) && msg.subject.contains(&host_id) {
+                // schedule the provider
+                let lc: LaunchProviderCommand =serde_json::from_slice(&msg.data).unwrap();
+                cplane_s.send(ControlCommand::StartProvider(lc, msg)).unwrap();
+            } else if msg.subject.ends_with(TERMINATE_PROVIDER) && msg.subject.contains(&host_id) {
+                let tc: TerminateProviderCommand = serde_json::from_slice(&msg.data).unwrap();
+                if !image_map.read().unwrap().contains_key(&tc.provider_ref) {
+                    warn!("Received request to terminate non-existent provider. Ignoring.");
+                } else {
+                    cplane_s.send(ControlCommand::TerminateProvider(tc)).unwrap();
+                }
+            } else if msg.subject.ends_with(PROVIDER_AUCTION_REQ) { // ** WARNING ** ORDER OF COMPARISON IS IMPORTANT HERE
+                let req: ProviderAuctionRequest = serde_json::from_slice(&msg.data)?;
+                if image_map.read().unwrap().contains_key(&req.provider_ref) {
+                    trace!("Skipping provider auction response - provider is in local image map");
+                } else {
+                    if !host_satifies_constraints(labels.clone(), &req.constraints) {
+                        trace!("Skipping provider auction response - host does not satisfy constraints.");
+                    } else {
+                        let ar = ProviderAuctionResponse {
+                          provider_ref: req.provider_ref.to_string(),
+                            host_id: host_id.to_string(),
+                        };
+                        info!("Responding to provider schedule auction request");
+                        let _ = msg.respond(serde_json::to_vec(&ar).unwrap());
+                    }
+                }
             } else if msg.subject.ends_with(AUCTION_REQ) {
                 let req: LaunchAuctionRequest = serde_json::from_slice(&msg.data)?;
                 if image_map.read().unwrap().contains_key(&req.actor_id) {
                     trace!("Skipping auction response - actor already running locally.");
                 } else {
-                    // TODO: validate constraint requirements
                     if !host_satifies_constraints(labels.clone(), &req.constraints) {
                         trace!("Skipping auction response - host does not satisfy constraints.");
                     } else {

@@ -117,6 +117,7 @@ use crossbeam_channel::Receiver;
 #[cfg(any(feature = "lattice", feature = "manifest"))]
 use inthost::RESTRICTED_LABELS;
 use plugins::PluginManager;
+use std::path::Path;
 use std::str::FromStr;
 use std::{
     collections::HashMap,
@@ -229,7 +230,8 @@ pub struct Host {
     middlewares: Arc<RwLock<Vec<Box<dyn Middleware>>>>,
     // the key to this field is the subscription subject, and not either a pk or a capid
     terminators: Arc<RwLock<HashMap<String, Sender<bool>>>>,
-    key: KeyPair,
+    pk: String,
+    sk: String,
     authorizer: Arc<RwLock<Box<dyn Authorizer>>>,
     labels: Arc<RwLock<HashMap<String, String>>>,
     // mapping between OCI registry image references and the associated unique identity (e.g. "Mxxx" and "Vxxx")
@@ -295,14 +297,15 @@ impl Host {
             bindings,
             caps,
             middlewares: Arc::new(RwLock::new(vec![])),
-            key: key,
+            pk: key.public_key(),
+            sk: key.seed().unwrap(),
             authorizer: authz,
             labels,
             ns,
             image_map,
         };
 
-        info!("Host ID is {} (v{})", host.key.public_key(), VERSION,);
+        info!("Host ID is {} (v{})", key.public_key(), VERSION);
 
         host.ensure_extras().unwrap();
 
@@ -338,6 +341,7 @@ impl Host {
             actor.token.claims.clone(),
         );
 
+        let key = KeyPair::from_seed(&self.sk).unwrap();
         let wg = crossbeam_utils::sync::WaitGroup::new();
         // Spin up a new thread that listens to "wasmbus.Mxxxx" calls on the message bus
         spawns::spawn_actor(
@@ -353,7 +357,7 @@ impl Host {
             self.bindings.clone(),
             c.clone(),
             self.terminators.clone(),
-            self.key.clone(),
+            key,
             self.authorizer.clone(),
             self.image_map.clone(),
             imgref,
@@ -404,6 +408,7 @@ impl Host {
         let binding = binding.unwrap_or("default");
 
         let wg = crossbeam_utils::sync::WaitGroup::new();
+        let key = KeyPair::from_seed(&self.sk).unwrap();
         // Spins up a new thread subscribed to the "wasmbus.{capid}.{binding}" subject
         spawns::spawn_actor(
             wg.clone(),
@@ -418,7 +423,7 @@ impl Host {
             self.bindings.clone(),
             self.claims.clone(),
             self.terminators.clone(),
-            self.key.clone(),
+            key,
             self.authorizer.clone(),
             self.image_map.clone(),
             None,
@@ -445,7 +450,8 @@ impl Host {
     /// so make sure the new actor can handle this stream of these delayed messages. Also ensure that
     /// the underlying WebAssembly driver (chosen via feature flag) supports hot-swapping module bytes.
     pub fn replace_actor(&self, new_actor: Actor) -> Result<()> {
-        crate::inthost::replace_actor(&self.key, self.bus.clone(), new_actor)
+        let key = KeyPair::from_seed(&self.sk).unwrap();
+        crate::inthost::replace_actor(&key, self.bus.clone(), new_actor)
     }
 
     /// Adds a middleware item to the middleware processing pipeline
@@ -475,6 +481,7 @@ impl Host {
             capability.descriptor().clone(),
         );
         let wg = crossbeam_utils::sync::WaitGroup::new();
+        let key = KeyPair::from_seed(&self.sk).unwrap();
         spawns::spawn_native_capability(
             capability,
             self.bus.clone(),
@@ -483,10 +490,33 @@ impl Host {
             self.terminators.clone(),
             self.plugins.clone(),
             wg.clone(),
-            Arc::new(self.key.clone()),
+            Arc::new(key),
         )?;
         wg.wait();
         Ok(())
+    }
+
+    /// Adds a native capability provider plugin to the host runtime by pulling the library from a provider archive
+    /// stored in an OCI-compliant registry. This file will be stored in the operating system's designated temporary
+    /// directory after being downloaded.
+    pub fn add_native_capability_from_registry(
+        &self,
+        image_ref: &str,
+        binding_name: Option<String>,
+    ) -> Result<()> {
+        let b = binding_name.unwrap_or("default".to_string());
+        match crate::inthost::fetch_provider(image_ref, &b, self.labels.clone()) {
+            Ok((prov, claims)) => {
+                self.add_native_capability(prov)?;
+                // Only write to the image map if the above add function succeeds
+                self.image_map
+                    .write()
+                    .unwrap()
+                    .insert(image_ref.to_string(), claims.subject.to_string());
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Removes a native capability provider plugin from the waSCC runtime
@@ -524,9 +554,10 @@ impl Host {
         };
         let buf = serialize(&cfg).unwrap();
         let binding = binding_name.unwrap_or("default".to_string());
+        let key = KeyPair::from_seed(&self.sk).unwrap();
         let inv_r = self.bus.invoke(
             &self.bus.provider_subject(&capid, &binding), // The OP_REMOVE_ACTOR invocation should go to _all_ instances of the provider being unbound
-            crate::inthost::gen_remove_actor(&self.key, buf.clone(), &binding, &capid),
+            crate::inthost::gen_remove_actor(&key, buf.clone(), &binding, &capid),
         )?;
         if let Some(s) = inv_r.error {
             Err(format!("Failed to remove binding: {}", s).into())
@@ -553,6 +584,8 @@ impl Host {
         let claims = self.bus.discover_claims(actor);
         #[cfg(not(feature = "lattice"))]
         let claims = self.claims.read().unwrap().get(actor).cloned();
+
+        let key = KeyPair::from_seed(&self.sk).unwrap();
 
         if claims.is_none() {
             return Err(errors::new(errors::ErrorKind::MiscHost(
@@ -595,7 +628,7 @@ impl Host {
         };
         trace!("Binding subject: {}", tgt_subject);
         let inv = inthost::gen_config_invocation(
-            &self.key,
+            &key,
             actor,
             capid,
             c.clone(),
@@ -642,13 +675,14 @@ impl Host {
     /// make a lattice-wide call. If you want to make lattice-wide invocations, please use
     /// the lattice client library.
     pub fn call_actor(&self, actor: &str, operation: &str, msg: &[u8]) -> Result<Vec<u8>> {
+        let key = KeyPair::from_seed(&self.sk).unwrap();
         if !self.claims.read().unwrap().contains_key(actor) {
             return Err(errors::new(errors::ErrorKind::MiscHost(
                 "No such actor".into(),
             )));
         }
         let inv = Invocation::new(
-            &self.key,
+            &key,
             WasccEntity::Actor(SYSTEM_ACTOR.to_string()),
             WasccEntity::Actor(actor.to_string()),
             operation,
@@ -685,11 +719,18 @@ impl Host {
             }
         }
         for actor in manifest.actors {
-            self.add_actor_registry_first(&actor)?;
+            self.add_actor_file_first(&actor)?; // If file, add .wasm, otherwise assume it's an OCI ref
         }
         for cap in manifest.capabilities {
             // for now, supports only file paths
-            self.add_native_capability(NativeCapability::from_file(cap.path, cap.binding_name)?)?;
+            if Path::new(&cap.path).exists() {
+                self.add_native_capability(NativeCapability::from_file(
+                    cap.path,
+                    cap.binding_name,
+                )?)?;
+            } else {
+                self.add_native_capability_from_registry(&cap.path, cap.binding_name)?;
+            }
         }
         for config in manifest.bindings {
             self.set_binding(
@@ -702,7 +743,7 @@ impl Host {
         Ok(())
     }
 
-    fn add_actor_registry_first(&self, actor: &str) -> Result<()> {
+    fn add_actor_file_first(&self, actor: &str) -> Result<()> {
         if std::path::Path::new(actor).exists() {
             self.add_actor(Actor::from_file(&actor)?)
         } else {
@@ -766,6 +807,6 @@ impl Host {
 
     /// Returns the public key of the host
     pub fn id(&self) -> String {
-        self.key.public_key()
+        self.pk.to_string()
     }
 }
