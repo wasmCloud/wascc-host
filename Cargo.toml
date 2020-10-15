@@ -55,7 +55,8 @@ serde_json = { version = "1.0.57", optional = true }
 envmnt = { version = "0.8.4", optional = true }
 structopt = { version = "0.3.17", optional = true }
 #latticeclient = { version="0.3.1" , optional = true}
-latticeclient = { path = "../lattice-client", optional = true}
+#latticeclient = { path = "../lattice-client", optional = true}
+latticeclient = { git = "https://github.com/wascc/lattice-client", optional = true }
 ctrlc = { version = "3.1.6", features = ["termination"], optional = true}
 wasm3-provider = { version = "0.0.1", optional = true}
 wasmtime-provider = { version = "0.0.1" , optional = true}
