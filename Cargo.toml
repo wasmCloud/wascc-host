@@ -1,6 +1,6 @@
 [package]
 name = "wascc-host"
-version = "0.13.1"
+version = "0.14.0"
 authors = ["Kevin Hoffman <alothien@gmail.com>"]
 edition = "2018"
 homepage = "https://wascc.dev"
@@ -31,28 +31,32 @@ crossbeam = "0.7.3"
 crossbeam-utils = "^0.7.0"
 prometheus = { version = "0.9", features = ["push"], optional = true }
 hyper = { version = "0.13", optional = true }
-tokio = { version = "0.2", features = ["macros"], optional = true }
+tokio = { version = "0.2", features = ["macros"] }
 wapc = { version = "0.10.0" }
 
-
 wascc-codec = "0.8"
-wascap = "0.5.0"
+wascap = "0.5.1"
 log = "0.4.11"
 rand = "0.7.3"
 env_logger = "0.7.1"
 ring = "0.16.15"
 data-encoding = "2.3.0"
+oci-distribution = "0.4.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+futures = "0.3.6"
+provider-archive = "0.1.0"
+
 
 # Opt-in dependencies chosen by feature flags
-gantryclient = { version = "0.1.0", optional = true }
-nats = { version = "0.7.3", optional = true }
+nats = { git = "https://github.com/autodidaddict/nats.rs", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_yaml = { version = "0.8.13", optional = true }
 serde_json = { version = "1.0.57", optional = true }
 envmnt = { version = "0.8.4", optional = true }
 structopt = { version = "0.3.17", optional = true }
-latticeclient = { version="0.3.1" , optional = true}
+#latticeclient = { version="0.3.1" , optional = true}
+#latticeclient = { path = "../lattice-client", optional = true}
+latticeclient = { git = "https://github.com/wascc/lattice-client", optional = true }
 ctrlc = { version = "3.1.6", features = ["termination"], optional = true}
 wasm3-provider = { version = "0.0.1", optional = true}
 wasmtime-provider = { version = "0.0.1" , optional = true}
@@ -61,7 +65,7 @@ wasmtime-provider = { version = "0.0.1" , optional = true}
 reqwest = { version = "0.10", features = ["blocking"] }
 mockito = "0.27"
 redis = "0.17.0"
-nats = "0.7.3"
+nats = {  git = "https://github.com/autodidaddict/nats.rs" }
 serde_json = "1.0.57"
 
 
@@ -69,8 +73,8 @@ serde_json = "1.0.57"
 default = ["wasmtime"]
 manifest = ["serde", "serde_yaml", "serde_json", "envmnt"]
 bin = ["structopt", "ctrlc"]
-prometheus_middleware = ["prometheus", "hyper", "tokio"]
-lattice = ["nats", "serde", "latticeclient", "serde_json", "gantryclient"]
+prometheus_middleware = ["prometheus", "hyper"]
+lattice = ["nats", "serde", "latticeclient", "serde_json"]
 wasmtime = ["wasmtime-provider"]
 wasm3 = ["wasm3-provider"]
 

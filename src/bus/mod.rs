@@ -41,6 +41,7 @@ pub(crate) fn new(
     ns: Option<String>,
     cplane_s: Sender<lattice::ControlCommand>,
     authz: Arc<RwLock<Box<dyn crate::authz::Authorizer>>>,
+    image_map: Arc<RwLock<HashMap<String, String>>>,
 ) -> MessageBus {
     lattice::DistributedBus::new(
         host_id,
@@ -52,6 +53,7 @@ pub(crate) fn new(
         ns,
         cplane_s,
         authz,
+        image_map,
     )
 }
 

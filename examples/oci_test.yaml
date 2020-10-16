@@ -1,0 +1,20 @@
+# This file demonstrates how to use OCI references in a manifest. This feature is
+# not yet fully stable, and requires that the images referenced below be pushed to 
+# the given registry
+---
+labels:
+    sample: "Key-Value Counter"
+actors:
+    - "wascc.azurecr.io/keyvalue:v1"
+capabilities:
+    - path: wascc.azurecr.io/redis-provider:v1
+    - path: wascc.azurecr.io/httpsrv-provider:v1
+bindings:
+    - actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ"
+      capability: "wascc:keyvalue"
+      values:
+        URL: redis://127.0.0.1:6379
+    - actor: "MASCXFM4R6X63UD5MSCDZYCJNPBVSIU6RKMXUPXRKAOSBQ6UY3VT3NPZ"
+      capability: "wascc:http_server"
+      values:
+        PORT: "8081"

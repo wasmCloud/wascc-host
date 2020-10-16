@@ -37,11 +37,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .format_module_path(false)
     .try_init();
 
-    let mut builder = HostBuilder::new();
-    #[cfg(feature = "lattice")]
-    let builder = builder.with_gantryclient(get_gantry_client());
-
-    let host = builder.build();
+    let host = HostBuilder::new().build();
 
     if let Some(ref mp) = cmd.manifest_path {
         let manifest = HostManifest::from_path(mp, cmd.expand_env)?;
@@ -78,60 +74,3 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     Ok(())
 }
-
-#[cfg(feature = "lattice")]
-fn get_gantry_client() -> gantryclient::Client {
-    let host = get_env(LATTICE_HOST_KEY, DEFAULT_LATTICE_HOST);
-    let creds = get_credsfile();
-    let timeout = get_timeout();
-
-    match gantryclient::Client::try_new(&host, creds.map(|c| c.into()), timeout) {
-        Ok(c) => {
-            info!("Gantry client created.");
-            c
-        }
-        Err(e) => {
-            error!("Failed to create Gantry client. Check if NATS is running and client is configured properly.");
-            error!("Terminating host (no lattice connectivity)");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn get_credsfile() -> Option<String> {
-    std::env::var(LATTICE_CREDSFILE_KEY).ok()
-}
-
-fn get_env(var: &str, default: &str) -> String {
-    match std::env::var(var) {
-        Ok(val) => {
-            if val.is_empty() {
-                default.to_string()
-            } else {
-                val.to_string()
-            }
-        }
-        Err(_) => default.to_string(),
-    }
-}
-
-fn get_timeout() -> Duration {
-    match std::env::var(LATTICE_RPC_TIMEOUT_KEY) {
-        Ok(val) => {
-            if val.is_empty() {
-                Duration::from_millis(DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS)
-            } else {
-                Duration::from_millis(val.parse().unwrap_or(DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS))
-            }
-        }
-        Err(_) => Duration::from_millis(DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS),
-    }
-}
-
-const LATTICE_HOST_KEY: &str = "LATTICE_HOST";
-// env var name
-const DEFAULT_LATTICE_HOST: &str = "127.0.0.1";
-// default mode is anonymous via loopback
-const LATTICE_RPC_TIMEOUT_KEY: &str = "LATTICE_RPC_TIMEOUT_MILLIS";
-const DEFAULT_LATTICE_RPC_TIMEOUT_MILLIS: u64 = 600;
-const LATTICE_CREDSFILE_KEY: &str = "LATTICE_CREDS_FILE";
