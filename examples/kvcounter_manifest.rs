@@ -17,6 +17,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         true,
     )?)?;
 
+    println!("**> curl localhost:8081/counter1 to test");
+
     std::thread::park();
     Ok(())
 }
